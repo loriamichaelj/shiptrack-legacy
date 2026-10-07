@@ -281,7 +281,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 - Coverage ≥ 75% on `domain/` and `api/`.
 - The cross-stack contract suite lives in `shiptrack-platform/validation/contract`.
 - **UI:** Vitest + React Testing Library for every page state (loading, found, not found, invalid input, network error) and the tracking-number validator. `tsc --noEmit` and ESLint must be clean.
-- **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack is used only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1). Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci.yml`; no workflow step depends on a developer workstation.
+- **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack (which needs an account and auth token) is used locally only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1); CI runs the same tests against a moto server, so fork PRs and token-less runs pass. The tests take the AWS endpoint from the environment. Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci.yml`; no workflow step depends on a developer workstation.
 
 ### 3.6 Web UI (minimal)
 
@@ -397,6 +397,8 @@ Metrics: `mem_used_percent`, `disk_used_percent` (namespace `CWAgent`, dimension
 5. Read `/shiptrack/legacy/current_release` from SSM. If it is set, download, verify, and install that release (so ASG replacement instances self-deploy).
 6. Enable and start the services.
 
+**Size limit:** EC2 user-data is limited to 16 KB raw. The rendered script plus the embedded configs must fit; if they do not, send them as a gzip-compressed cloud-init multipart payload.
+
 **Gotcha — venv relocation:** virtualenvs embed absolute paths. The build creates the venv at the **exact install path** `/opt/shiptrack/releases/<sha>/venv` (§7.1), and every entrypoint is invoked as `venv/bin/python -m …`, never via console-script shebangs.
 
 ---
@@ -443,7 +445,7 @@ Default tags are the same keys as platform, with `Stack=legacy` and `Repo=shiptr
 - Output: `shiptrack-<sha>.tar.gz` (created with `tar -C /opt/shiptrack/releases -czf … <sha>`) plus `shiptrack-<sha>.tar.gz.sha256`.
 
 ### 7.2 Deploy — `.github/workflows/deploy.yml`
-Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `shiptrack-legacy-deploy` role via OIDC.
+Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `shiptrack-legacy-deploy` role via OIDC. The first deploy requires `db/bootstrap.sql` (platform §6.4) to have been run.
 
 1. Build the tarball, then upload the tarball and checksum to `s3://<artifacts>/releases/`.
 2. **Migrate:** `ssm send-command` `ShipTrack-Migrate` to **one** instance (the first InService instance from the ASG). It downloads the release to a temp dir and runs `alembic upgrade head` with the `app.ini` credentials. Skip this step when the repo variable `RUN_MIGRATIONS` is `false` (set after the schema-ownership handoff; see modern §9.1).
@@ -478,6 +480,7 @@ Steps: ruff, mypy, pytest (Postgres 17 service), UI (`npm ci`, `npm run lint`, `
 GitHub-hosted runners can reach the ALB and AWS APIs but not the private RDS instance, and no AWS credentials exist on workstations, so the assessment runs in workflows.
 
 - **`evidence.yml`** (`workflow_dispatch`, `environment: dev`, `shiptrack-legacy-deploy` role): dispatches the SSM document `ShipTrack-Evidence` to one legacy host. The document runs an allow-listed script from `scripts/evidence/` using the release venv's psycopg (no `psql` client is installed) with the `app.ini` credentials, and returns the output. It also runs `simulator verify`: the workflow first uploads the ledger and the simulator package to the artifact bucket, and the host runs `verify` against the database.
+  - Raw SSM output is never printed to the workflow log. Each script's output passes through the scrub step before it is echoed or stored (platform §6.12). The allow-listed scripts include the G-POD gate query (below).
 - **`assess.yml`** (`workflow_dispatch`): orchestrates §9 end to end.
   - k6 `baseline` with `TARGET=legacy` (platform repo checked out at a pinned SHA).
   - The AP-05/06/09/12/16 evidence runs. AP-06 triggers `deploy.yml` through `workflow_dispatch` while the simulator runs.
@@ -530,6 +533,7 @@ v1.1.0 is required before cutover **Wave 2**. In real migrations the legacy app 
 - **AP-09:** the duplicate-alerts query above.
 - **AP-12:** ALB `HTTPCode_ELB_502_Count` and `HTTPCode_Target_5XX_Count` for tg-legacy over the deploy window.
 - **AP-16:** `curl -sI $BASE_URL/ui/` → list the missing security headers.
+- **G-POD gate (modern §9.2):** the `pod-gate` script prints the count of `file://` POD rows older than 5 minutes.
 
 ---
 
@@ -557,7 +561,7 @@ Cross-repo build order is in platform §13. L1, L1b, and the build parts of L2 c
 | **L1b Web UI** | `web/` per §3.6, Vitest tests | `npm run build` produces `web/dist`; tests green; bundle < 200 KB gzipped |
 | **L2 Packaging** | `deploy/` configs (systemd, nginx, cron, logrotate, CloudWatch agent), `scripts/build_tarball.sh`, `deploy.sh`, `rollback.sh`, `migrate.sh` | Tarball builds in an `amazonlinux:2023` container; `shellcheck` passes |
 | **L3 Terraform** | `modules/app_host`, `envs/dev`, SSM docs, artifact bucket | `validate` passes; the AP settings visible in the plan |
-| **L4 CI/CD** | `ci.yml`, `deploy.yml`, `rollback.yml`, `terraform-pr.yml`, `terraform-apply.yml` (§7.5) | `actionlint` passes; OIDC role ARNs from repo variables; the plan role produces a clean plan |
+| **L4 CI/CD** | `ci.yml`, `deploy.yml`, `rollback.yml`, `terraform-pr.yml`, `terraform-apply.yml` (§7.5) | `actionlint` passes; OIDC role ARNs from repo secrets; the plan role produces a clean plan |
 | **L5 Assessment tooling** | `assess.yml` and `evidence.yml` (§7.6), the `ShipTrack-Evidence` SSM document, `scripts/evidence/*`, `docs/assessment/` templates | `actionlint` passes; templates contain every AP and placeholders for numbers; the scrub step is tested on sample data |
 | **L6 v1.1.0** *(on request)* | §8 | Migration script is idempotent; GET serves both `file://` and `s3://` |
 
@@ -566,9 +570,10 @@ Cross-repo build order is in platform §13. L1, L1b, and the build parts of L2 c
 ## 12. Verify-at-build-time list
 
 - [x] AL2023 `python3.12` / `python3.12-pip` packages (confirmed)
-- [ ] `uvicorn-worker` package/class name
-- [ ] Node 24 LTS status and current React / Vite / React Router majors at build time
+- [x] `uvicorn-worker` package and `uvicorn_worker.UvicornWorker` class (confirmed)
+- [x] Node 24 is Active LTS (since October 28, 2025)
+- [ ] Current React / Vite / React Router majors at build time
 - [ ] AL2023 `amazon-cloudwatch-agent` package name and config path
 - [ ] `amazonlinux:2023` container glibc matches the AMI
-- [ ] LocalStack edition and coverage for S3, SSM, and Secrets Manager
+- [ ] LocalStack account and auth token (the Community edition ended March 2026); coverage for S3, SSM, and Secrets Manager
 - [ ] `ReadOnlyAccess` covers the Cost Explorer reads used by `assess.yml`

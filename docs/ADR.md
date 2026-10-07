@@ -8,6 +8,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0002 | `podsync-interval-and-window` | Planned |
 | 0003 | `v1.1-kms-on-pod-bucket` | Planned |
 | 0004 | `evidence-via-ssm-and-workflows` | Planned |
+| 0005 | `aws-emulator-in-ci` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -56,3 +57,13 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** _to be written when decided_
 
 **Consequences:** _to be written when decided_
+
+## ADR-0005: aws-emulator-in-ci
+
+**Status:** Accepted
+
+**Context:** LocalStack ended its Community edition in March 2026 and now requires an account and auth token. Secrets are not available to fork PRs.
+
+**Decision:** Use LocalStack locally. CI runs the same tests against a moto server. Tests take the AWS endpoint from the environment.
+
+**Consequences:** CI needs no token and works for fork PRs. Two emulators must both pass the tests; behavior differences surface in review.
