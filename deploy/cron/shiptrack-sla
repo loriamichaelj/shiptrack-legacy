@@ -1,0 +1,5 @@
+# LEGACY AP-09: this job is installed on every host and the scan is a naive read-then-write
+# with no locking, so two hosts can raise the same alert twice.
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/5 * * * * shiptrack /opt/shiptrack/current/venv/bin/python -m shiptrack.jobs.sla_scan >> /var/log/shiptrack/sla.log 2>&1

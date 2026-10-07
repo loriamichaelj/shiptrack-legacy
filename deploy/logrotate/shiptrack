@@ -1,0 +1,9 @@
+/var/log/shiptrack/*.log {
+    daily
+    rotate 7
+    compress
+    copytruncate
+    missingok
+    notifempty
+    su shiptrack shiptrack
+}

@@ -1,0 +1,12 @@
+fastapi
+gunicorn
+psycopg[binary]>=3.2
+pydantic>=2
+python-multipart
+sqlalchemy>=2.0
+alembic
+boto3
+uvicorn
+uvicorn-worker
+# Build backend, installed so that `pip install --no-build-isolation .` needs no unhashed download.
+setuptools

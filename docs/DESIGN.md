@@ -60,7 +60,10 @@ shiptrack-legacy/
 │   │   ├── events.py
 │   │   ├── track.py
 │   │   ├── pod.py
-│   │   └── health.py                      # GET / only (AP-07)
+│   │   ├── health.py                      # GET / only (AP-07)
+│   │   ├── errors.py                      # error envelope and exception handlers
+│   │   ├── pagination.py                  # keyset cursor encode/decode
+│   │   └── deps.py                        # shared route helpers
 │   ├── domain/
 │   │   ├── status.py                      # State machine
 │   │   ├── eta.py
@@ -73,18 +76,19 @@ shiptrack-legacy/
 │   └── jobs/sla_scan.py                   # Cron entrypoint (AP-09)
 ├── migrations/                            # Alembic; 0001_initial creates the schema and seeds carriers
 ├── alembic.ini
-├── tests/{unit,integration}/
+├── tests/{unit,integration,packaging}/
 ├── web/                                   # UI: React + Vite + TypeScript (§3.6)
 │   ├── index.html
-│   ├── package.json  package-lock.json  .nvmrc
+│   ├── package.json  package-lock.json  .nvmrc  .npmrc
 │   ├── vite.config.ts  tsconfig.json  eslint.config.js
+│   ├── scripts/check-dist.mjs             # post-build checks: no inline script/style, size budget, asset names
 │   └── src/
-│       ├── main.tsx  App.tsx  api.ts  styles.css
+│       ├── main.tsx  App.tsx  api.ts  format.ts  stack.tsx  styles.css
 │       ├── pages/{SearchPage,TrackPage,NotFoundPage}.tsx
 │       ├── components/{StatusBadge,Timeline,StackBadge}.tsx
 │       └── __tests__/
-├── deploy/                                # systemd, nginx, cron, logrotate, CloudWatch agent configs (§5)
-├── scripts/                               # build_tarball.sh, deploy.sh, rollback.sh, migrate.sh, migrate_pod_to_s3.py (v1.1)
+├── deploy/                                # systemd/, nginx/, cron/, logrotate/, cloudwatch/ configs (§5)
+├── scripts/                               # build_tarball.sh (+ build_in_container.sh), deploy.sh, rollback.sh, migrate.sh, lib.sh, migrate_pod_to_s3.py (v1.1)
 │   └── evidence/                          # AP evidence scripts (§9)
 ├── terraform/                             # §6
 │   ├── modules/app_host/
@@ -99,7 +103,8 @@ shiptrack-legacy/
 │   ├── workflows/                         # ci, deploy, rollback, terraform-pr, terraform-apply, evidence, assess (§7)
 │   └── dependabot.yml
 ├── pyproject.toml                         # Package metadata; ruff, mypy, pytest config
-├── requirements.in  requirements.txt      # pip-compile with hashes (plus dev equivalents)
+├── requirements.in  requirements.txt      # pip-compile with hashes
+├── requirements-dev.in  requirements-dev.txt
 ├── compose.yaml                           # Local only: Postgres 17 (+ LocalStack for v1.1)
 ├── Makefile                               # Local lint, test, and build targets
 ├── .gitleaks.toml  .gitignore
@@ -281,6 +286,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 - Coverage ≥ 75% on `domain/` and `api/`.
 - The cross-stack contract suite lives in `shiptrack-platform/validation/contract`.
 - **UI:** Vitest + React Testing Library for every page state (loading, found, not found, invalid input, network error) and the tracking-number validator. `tsc --noEmit` and ESLint must be clean.
+- **Packaging:** `tests/packaging/run.sh` builds the tarball and, on a fresh `amazonlinux:2023` container, runs migrate, deploy, rollback, pruning, and checksum-failure cases plus the nginx checks: stack header on every route, UI deep links, asset caching, no security headers (AP-16), and the 10 MiB POD limit.
 - **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack (which needs an account and auth token) is used locally only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1); CI runs the same tests against a moto server, so fork PRs and token-less runs pass. The tests take the AWS endpoint from the environment. Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci.yml`; no workflow step depends on a developer workstation.
 
 ### 3.6 Web UI (minimal)
@@ -361,14 +367,14 @@ The app runs as system user `shiptrack` (no login shell).
 - `User=shiptrack`, `RuntimeDirectory=shiptrack`, `Restart=always`, `RestartSec=2`
 - `KillMode=mixed`, `TimeoutStopSec=10` (short; in-flight queue items are lost — AP-06)
 
-**nginx:** `listen 80`; `location /` proxies to the unix socket; `client_max_body_size 10m`; `proxy_read_timeout 30s`; forwards `X-Forwarded-*`; `add_header X-ShipTrack-Stack legacy always;` (stack identification for routing verification; set at the proxy so the forked app code stays unaware of it).
+**nginx:** `deploy/nginx/nginx.conf` replaces the AL2023 default so the stock server block cannot shadow `shiptrack.conf`. `listen 80`; `location /` proxies to the unix socket; `client_max_body_size 11m` (a 10 MiB file plus multipart overhead: the application enforces the exact limit and answers with its error envelope, and an `error_page 413` gives bodies past nginx's limit the same envelope); `proxy_read_timeout 30s`; forwards `X-Forwarded-*`; `add_header X-ShipTrack-Stack legacy always;` (stack identification for routing verification; set at the proxy so the forked app code stays unaware of it).
 
 **nginx UI locations:**
 - `location /ui/assets/` → `alias /opt/shiptrack/current/web/dist/assets/;` with `Cache-Control: public, max-age=31536000, immutable`.
 - `location /ui/` → `alias /opt/shiptrack/current/web/dist/;` with `try_files $uri $uri/ /ui/index.html;` and `Cache-Control: no-cache`.
 - `gzip on` for `text/css` and `application/javascript`.
 - No security headers (AP-16).
-- **Gotcha:** an `add_header` inside a `location` block **cancels inheritance** of every server-level `add_header`. Repeat `add_header X-ShipTrack-Stack legacy always;` in both UI locations, or put all headers in an `include` snippet used everywhere. Otherwise UI responses silently lose the stack header and the contract suite fails.
+- **Gotcha:** an `add_header` inside a `location` block **cancels inheritance** of every server-level `add_header`. Repeat `add_header X-ShipTrack-Stack legacy always;` in both UI locations, so keep it in an `include` snippet (`shiptrack-headers.inc`) used in every location that sets a header. Otherwise UI responses silently lose the stack header and the contract suite fails.
 - **Gotcha:** `alias` combined with `try_files` is easy to get wrong. Test deep links (`/ui/track/MF0000000000`) explicitly.
 
 **cron** `/etc/cron.d/shiptrack-sla`:
@@ -424,7 +430,7 @@ terraform/
 | S3 `shiptrack-legacy-artifacts-<acct>-<region>` | Versioning, SSE-S3, BPA, ownership enforced, TLS-only; lifecycle expires `releases/*` at 180 d |
 | SSM parameter `/shiptrack/legacy/current_release` | Initial value `none`; `lifecycle { ignore_changes = [value] }` (owned by the deploy pipeline) |
 | SSM parameter `/shiptrack/legacy/asg_name` | ASG name, for platform/modern runbooks |
-| SSM documents | `ShipTrack-Migrate`, `ShipTrack-Deploy`, `ShipTrack-Rollback`, `ShipTrack-Evidence` (§7.6), `ShipTrack-PodSync` (v1.1) — `aws:runShellScript` wrappers around `scripts/*.sh`, with parameters `releaseSha` and `artifactBucket`; `ShipTrack-Evidence` also takes `script` (an allow-listed name under `scripts/evidence/`) and an optional S3 key for an input file |
+| SSM documents | `ShipTrack-Migrate`, `ShipTrack-Deploy`, `ShipTrack-Rollback`, `ShipTrack-Evidence` (§7.6), `ShipTrack-PodSync` (v1.1) — `aws:runShellScript` documents that embed `scripts/lib.sh` and the script they run (Terraform `file()`), so they work before any release is on the host, with parameters `releaseSha` and `artifactBucket`; `ShipTrack-Evidence` also takes `script` (an allow-listed name under `scripts/evidence/`) and an optional S3 key for an input file |
 | CloudWatch log groups | As in §5 |
 | Alarms (host-level only, AP-15) | `CPUUtilization > 80%` 15 min; `StatusCheckFailed > 0` 5 min; `mem_used_percent > 90%` 10 min → SNS sev2; descriptions include owner/sev/runbook |
 
@@ -435,11 +441,11 @@ Default tags are the same keys as platform, with `Stack=legacy` and `Repo=shiptr
 ## 7. Build, deploy, rollback
 
 ### 7.1 Build — `scripts/build_tarball.sh <sha>`
-- **UI stage first:** in a `node:24` container (pinned by digest; its Node version must equal `web/.nvmrc`), run `npm ci && npm run build` in `web/`. The output `web/dist/` is copied into the release in step 4.
+- **UI stage first:** in a Node container pinned by digest (its Node version must equal `web/.nvmrc`; the script fails otherwise), run `npm ci && npm run build` in `web/`. The output `web/dist/` is copied into the release in step 4.
 - Runs inside an `amazonlinux:2023` container, so glibc and Python match the hosts.
   1. Install `python3.12`.
   2. Create the venv at `/opt/shiptrack/releases/<sha>/venv`.
-  3. `pip install --require-hashes -r requirements.txt`, then `pip install --no-deps .`.
+  3. `pip install --require-hashes -r requirements.txt`, then `pip install --no-deps --no-build-isolation .` (setuptools is in the hashed requirements, so the build downloads nothing unhashed).
   4. Copy `alembic.ini`, `migrations/`, `deploy/`, `scripts/`, and `web/dist/` into the release directory.
   5. Write a `RELEASE` file (sha, UTC build time, builder).
 - Output: `shiptrack-<sha>.tar.gz` (created with `tar -C /opt/shiptrack/releases -czf … <sha>`) plus `shiptrack-<sha>.tar.gz.sha256`.
@@ -448,7 +454,7 @@ Default tags are the same keys as platform, with `Stack=legacy` and `Repo=shiptr
 Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `shiptrack-legacy-deploy` role via OIDC. The first deploy requires `db/bootstrap.sql` (platform §6.4) to have been run.
 
 1. Build the tarball, then upload the tarball and checksum to `s3://<artifacts>/releases/`.
-2. **Migrate:** `ssm send-command` `ShipTrack-Migrate` to **one** instance (the first InService instance from the ASG). It downloads the release to a temp dir and runs `alembic upgrade head` with the `app.ini` credentials. Skip this step when the repo variable `RUN_MIGRATIONS` is `false` (set after the schema-ownership handoff; see modern §9.1).
+2. **Migrate:** `ssm send-command` `ShipTrack-Migrate` to **one** instance (the first InService instance from the ASG). It extracts the release to its final path without activating it (the virtualenv cannot be relocated) and runs `alembic upgrade head` with the `app.ini` credentials. Skip this step when the repo variable `RUN_MIGRATIONS` is `false` (set after the schema-ownership handoff; see modern §9.1).
 3. **Deploy:** `ShipTrack-Deploy` targets tag `Stack=legacy` with `--max-concurrency 1 --max-errors 0`. `scripts/deploy.sh` then:
    1. Downloads the release and verifies its sha256.
    2. Extracts it to `releases/<sha>`.
@@ -463,7 +469,7 @@ Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional 
 6. Poll each SSM command until it completes. Fail the job on any instance failure.
 
 ### 7.3 Rollback — `scripts/rollback.sh` via `ShipTrack-Rollback`
-- Points `current` at the previous entry in `RELEASE_HISTORY`, restarts the service, and updates the SSM parameter.
+- Points `current` at the previous entry in `RELEASE_HISTORY`, restarts the service, and prints `ROLLED_BACK_TO=<sha>`; the rollback workflow then updates the SSM parameter, which instances are not allowed to write.
 - It **does not roll back the database** (documented in `docs/runbooks/rollback.md`).
 - Exposed as `workflow_dispatch` with an optional target sha.
 
@@ -559,7 +565,7 @@ Cross-repo build order is in platform §13. L1, L1b, and the build parts of L2 c
 |---|---|---|
 | **L1 Application** | `src/`, `migrations/0001`, unit + integration tests, error envelope | `pytest` green; coverage met; every §3.4 route present |
 | **L1b Web UI** | `web/` per §3.6, Vitest tests | `npm run build` produces `web/dist`; tests green; bundle < 200 KB gzipped |
-| **L2 Packaging** | `deploy/` configs (systemd, nginx, cron, logrotate, CloudWatch agent), `scripts/build_tarball.sh`, `deploy.sh`, `rollback.sh`, `migrate.sh` | Tarball builds in an `amazonlinux:2023` container; `shellcheck` passes |
+| **L2 Packaging** | `deploy/` configs (systemd, nginx, cron, logrotate, CloudWatch agent), `scripts/build_tarball.sh`, `deploy.sh`, `rollback.sh`, `migrate.sh`, `lib.sh`, `tests/packaging/` | Tarball builds in an `amazonlinux:2023` container; `shellcheck` passes; `tests/packaging/run.sh` passes |
 | **L3 Terraform** | `modules/app_host`, `envs/dev`, SSM docs, artifact bucket | `validate` passes; the AP settings visible in the plan |
 | **L4 CI/CD** | `ci.yml`, `deploy.yml`, `rollback.yml`, `terraform-pr.yml`, `terraform-apply.yml` (§7.5) | `actionlint` passes; OIDC role ARNs from repo secrets; the plan role produces a clean plan |
 | **L5 Assessment tooling** | `assess.yml` and `evidence.yml` (§7.6), the `ShipTrack-Evidence` SSM document, `scripts/evidence/*`, `docs/assessment/` templates | `actionlint` passes; templates contain every AP and placeholders for numbers; the scrub step is tested on sample data |
@@ -573,7 +579,7 @@ Cross-repo build order is in platform §13. L1, L1b, and the build parts of L2 c
 - [x] `uvicorn-worker` package and `uvicorn_worker.UvicornWorker` class (confirmed)
 - [x] Node 24 is Active LTS (since October 28, 2025)
 - [ ] Current React / Vite / React Router majors at build time
-- [ ] AL2023 `amazon-cloudwatch-agent` package name and config path
-- [ ] `amazonlinux:2023` container glibc matches the AMI
+- [x] AL2023 `amazon-cloudwatch-agent` package and `/opt/aws/amazon-cloudwatch-agent/etc/` config directory (confirmed)
+- [x] `amazonlinux:2023` and the AMI are both glibc 2.34 across the AL2023 line (confirmed); pin the AMI to the container's release
 - [ ] LocalStack account and auth token (the Community edition ended March 2026); coverage for S3, SSM, and Secrets Manager
 - [ ] `ReadOnlyAccess` covers the Cost Explorer reads used by `assess.yml`

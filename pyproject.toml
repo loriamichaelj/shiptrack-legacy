@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shiptrack"
+version = "1.0.0"
+description = "ShipTrack shipment tracking API (legacy stack)"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+# Exact, hash-pinned versions live in requirements.txt (pip-compile output).
+dependencies = { file = ["requirements.in"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PL", "RUF"]
+ignore = ["PLR0913", "PLR2004", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0915"]
+"migrations/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+ignore_missing_imports = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = "shiptrack.domain.*"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error::DeprecationWarning:shiptrack.*"]
+
+[tool.coverage.run]
+source = ["shiptrack"]
+branch = true
