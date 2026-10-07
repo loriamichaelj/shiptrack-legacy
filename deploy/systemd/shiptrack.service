@@ -1,0 +1,21 @@
+[Unit]
+Description=ShipTrack API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=shiptrack
+Group=shiptrack
+RuntimeDirectory=shiptrack
+RuntimeDirectoryMode=0755
+WorkingDirectory=/opt/shiptrack/current
+# LEGACY AP-08: plain-text log files; there is no request ID to correlate lines.
+ExecStart=/opt/shiptrack/current/venv/bin/python -m gunicorn shiptrack.main:app -k uvicorn_worker.UvicornWorker -w 4 -b unix:/run/shiptrack/gunicorn.sock --access-logfile /var/log/shiptrack/access.log --error-logfile /var/log/shiptrack/error.log --timeout 30
+Restart=always
+RestartSec=2
+KillMode=mixed
+# LEGACY AP-06: a short stop timeout; events still queued in the process are lost on restart.
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
