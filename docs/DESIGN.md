@@ -48,21 +48,62 @@
 
 **Non-goals:** autoscaling, containers, high availability beyond two hosts, authentication, CI security scanning (deliberate — AP-13).
 
-**Repository layout (top level)**
+**Repository layout**
 
 ```
 shiptrack-legacy/
-├── src/  migrations/  tests/  web/        # §3
+├── src/shiptrack/                         # Python application
+│   ├── main.py                            # FastAPI app factory, routers, exception handlers
+│   ├── config.py                          # INI loader
+│   ├── api/                               # HTTP API
+│   │   ├── shipments.py
+│   │   ├── events.py
+│   │   ├── track.py
+│   │   ├── pod.py
+│   │   └── health.py                      # GET / only (AP-07)
+│   ├── domain/
+│   │   ├── status.py                      # State machine
+│   │   ├── eta.py
+│   │   └── models.py                      # Pydantic schemas
+│   ├── db/                                # Database access
+│   │   ├── models.py                      # SQLAlchemy ORM
+│   │   └── session.py
+│   ├── events/processor.py                # In-process queue + thread (AP-06)
+│   ├── storage/local.py                   # Local-disk POD storage (AP-05)
+│   └── jobs/sla_scan.py                   # Cron entrypoint (AP-09)
+├── migrations/                            # Alembic; 0001_initial creates the schema and seeds carriers
+├── alembic.ini
+├── tests/{unit,integration}/
+├── web/                                   # UI: React + Vite + TypeScript (§3.6)
+│   ├── index.html
+│   ├── package.json  package-lock.json  .nvmrc
+│   ├── vite.config.ts  tsconfig.json  eslint.config.js
+│   └── src/
+│       ├── main.tsx  App.tsx  api.ts  styles.css
+│       ├── pages/{SearchPage,TrackPage,NotFoundPage}.tsx
+│       ├── components/{StatusBadge,Timeline,StackBadge}.tsx
+│       └── __tests__/
 ├── deploy/                                # systemd, nginx, cron, logrotate, CloudWatch agent configs (§5)
-├── scripts/                               # build_tarball.sh, deploy.sh, rollback.sh, migrate.sh, evidence/ (§7, §9)
+├── scripts/                               # build_tarball.sh, deploy.sh, rollback.sh, migrate.sh, migrate_pod_to_s3.py (v1.1)
+│   └── evidence/                          # AP evidence scripts (§9)
 ├── terraform/                             # §6
-├── runbooks/                              # rollback.md and other operational runbooks
+│   ├── modules/app_host/
+│   ├── templates/user-data.sh.tftpl       # Reads the deploy/ files so each config has one source
+│   └── envs/dev/
 ├── docs/
 │   ├── DESIGN.md
 │   ├── ADR.md                             # decision log
+│   ├── runbooks/                          # rollback.md and other operational runbooks
 │   └── assessment/                        # §9 outputs
-├── .github/workflows/                     # ci, deploy, rollback, terraform-pr, terraform-apply, evidence, assess (§7)
-└── Makefile                               # local lint, test, and build targets
+├── .github/
+│   ├── workflows/                         # ci, deploy, rollback, terraform-pr, terraform-apply, evidence, assess (§7)
+│   └── dependabot.yml
+├── pyproject.toml                         # Package metadata; ruff, mypy, pytest config
+├── requirements.in  requirements.txt      # pip-compile with hashes (plus dev equivalents)
+├── compose.yaml                           # Local only: Postgres 17 (+ LocalStack for v1.1)
+├── Makefile                               # Local lint, test, and build targets
+├── .gitleaks.toml  .gitignore
+└── README.md
 ```
 
 ---
@@ -85,40 +126,7 @@ shiptrack-legacy/
 | Web UI | React + TypeScript, Vite, React Router (library mode); built at build time, served as static files by nginx (§3.6) |
 | UI tooling | Node 24 LTS (build time only; pinned in `web/.nvmrc`), npm with `package-lock.json`, ESLint, Vitest + React Testing Library |
 
-Package layout:
-
-```
-src/shiptrack/
-├── main.py                  # FastAPI app factory, routers, exception handlers
-├── config.py                # INI loader
-├── api/
-│   ├── shipments.py
-│   ├── events.py
-│   ├── track.py
-│   ├── pod.py
-│   └── health.py            # GET / only (AP-07)
-├── domain/
-│   ├── status.py            # State machine
-│   ├── eta.py
-│   └── models.py            # Pydantic schemas
-├── db/
-│   ├── models.py            # SQLAlchemy ORM
-│   └── session.py
-├── events/processor.py      # In-process queue + thread (AP-06)
-├── storage/local.py         # Local-disk POD storage (AP-05)
-└── jobs/sla_scan.py         # Cron entrypoint (AP-09)
-migrations/                  # Alembic
-tests/{unit,integration}/
-web/                         # React UI (§3.6)
-├── index.html
-├── package.json  package-lock.json  .nvmrc
-├── vite.config.ts  tsconfig.json  eslint.config.js
-└── src/
-    ├── main.tsx  App.tsx  api.ts  styles.css
-    ├── pages/{SearchPage,TrackPage,NotFoundPage}.tsx
-    ├── components/{StatusBadge,Timeline,StackBadge}.tsx
-    └── __tests__/
-```
+Package and UI layout: see the repository layout in §2.
 
 ### 3.2 Data model
 
@@ -454,7 +462,7 @@ Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional 
 
 ### 7.3 Rollback — `scripts/rollback.sh` via `ShipTrack-Rollback`
 - Points `current` at the previous entry in `RELEASE_HISTORY`, restarts the service, and updates the SSM parameter.
-- It **does not roll back the database** (documented in `runbooks/rollback.md`).
+- It **does not roll back the database** (documented in `docs/runbooks/rollback.md`).
 - Exposed as `workflow_dispatch` with an optional target sha.
 
 ### 7.4 CI — `.github/workflows/ci.yml` (pull_request)
