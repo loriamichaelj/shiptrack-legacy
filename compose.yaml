@@ -1,0 +1,15 @@
+# Local development only: Postgres 17 for unit/integration tests and manual runs.
+# LocalStack (S3/SSM/Secrets Manager) is added for the v1.1 POD migration work.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

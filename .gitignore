@@ -1,1 +1,16 @@
 .DS_Store
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+node_modules/
+web/dist/
+*.tar.gz
+*.tar.gz.sha256
