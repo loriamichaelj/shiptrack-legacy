@@ -1,0 +1,101 @@
+#!/bin/bash
+# ShipTrack legacy host bootstrap (design §5). Runs once per instance, as root, from cloud-init.
+# Config files are inserted verbatim from the repository's deploy/ directory.
+set -euo pipefail
+exec > >(tee /var/log/shiptrack-user-data.log) 2>&1
+
+export AWS_DEFAULT_REGION="${region}"
+ARTIFACT_BUCKET="${artifact_bucket}"
+
+# 1. Packages, the service user, and directories.
+dnf install -y python3.12 python3.12-pip nginx amazon-cloudwatch-agent cronie logrotate jq
+id shiptrack >/dev/null 2>&1 || useradd --system --shell /sbin/nologin --home-dir /opt/shiptrack shiptrack
+install -d -o shiptrack -g shiptrack -m 0755 /opt/shiptrack /opt/shiptrack/releases /var/log/shiptrack
+# LEGACY AP-05: uploaded documents live on the local disk of whichever host took the request.
+install -d -o shiptrack -g shiptrack -m 0755 /var/lib/shiptrack /var/lib/shiptrack/pod
+install -d -m 0755 /etc/shiptrack /usr/local/lib
+touch /opt/shiptrack/RELEASE_HISTORY
+chown shiptrack:shiptrack /opt/shiptrack/RELEASE_HISTORY
+
+# 2. Platform parameters from the SSM contract.
+platform() { aws ssm get-parameter --name "/shiptrack/platform/$1" --query Parameter.Value --output text; }
+DB_HOST=$(platform rds_endpoint)
+DB_PORT=$(platform rds_port)
+DB_NAME=$(platform db_name)
+SECRET_ARN=$(platform db_migrator_secret_arn)
+
+# 3. LEGACY AP-01 and AP-02: the migrator's credentials, in plaintext, mode 0644, used for runtime too.
+SECRET=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --query SecretString --output text)
+DB_USER=$(jq -r .username <<<"$SECRET")
+DB_PASS=$(jq -r .password <<<"$SECRET")
+cat >/etc/shiptrack/app.ini <<INI
+[database]
+host = $DB_HOST
+port = $DB_PORT
+name = $DB_NAME
+user = $DB_USER
+password = $DB_PASS
+sslmode = require
+
+[app]
+pod_dir = /var/lib/shiptrack/pod
+log_file = /var/log/shiptrack/app.log
+log_level = INFO
+INI
+chmod 0644 /etc/shiptrack/app.ini
+unset SECRET DB_PASS
+
+# 4. Service, proxy, cron, logrotate, and CloudWatch agent configuration.
+cat >/etc/systemd/system/shiptrack.service <<'SHIPTRACK_EOF_SERVICE'
+${systemd_service}
+SHIPTRACK_EOF_SERVICE
+
+cat >/etc/nginx/nginx.conf <<'SHIPTRACK_EOF_NGINX'
+${nginx_conf}
+SHIPTRACK_EOF_NGINX
+
+cat >/etc/nginx/conf.d/shiptrack.conf <<'SHIPTRACK_EOF_SITE'
+${nginx_site}
+SHIPTRACK_EOF_SITE
+
+cat >/etc/nginx/conf.d/shiptrack-headers.inc <<'SHIPTRACK_EOF_HEADERS'
+${nginx_headers}
+SHIPTRACK_EOF_HEADERS
+
+cat >/etc/cron.d/shiptrack-sla <<'SHIPTRACK_EOF_CRON'
+${cron_sla}
+SHIPTRACK_EOF_CRON
+
+cat >/etc/logrotate.d/shiptrack <<'SHIPTRACK_EOF_LOGROTATE'
+${logrotate}
+SHIPTRACK_EOF_LOGROTATE
+
+cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'SHIPTRACK_EOF_CWAGENT'
+${cloudwatch_agent}
+SHIPTRACK_EOF_CWAGENT
+
+# The deploy helpers, so this script can install a release the way the SSM documents do.
+cat >/usr/local/lib/shiptrack-lib.sh <<'SHIPTRACK_EOF_LIB'
+${lib_sh}
+SHIPTRACK_EOF_LIB
+
+systemctl daemon-reload
+
+# 5. A replacement instance installs the release the pipeline last published.
+RELEASE=$(aws ssm get-parameter --name /shiptrack/legacy/current_release --query Parameter.Value --output text || echo none)
+if [[ "$RELEASE" != "none" && -n "$RELEASE" ]]; then
+  # shellcheck disable=SC1091
+  source /usr/local/lib/shiptrack-lib.sh
+  fetch_release "$RELEASE" "$ARTIFACT_BUCKET"
+  activate_release "$RELEASE"
+  echo "$RELEASE" >>/opt/shiptrack/RELEASE_HISTORY
+fi
+
+# 6. Start the services. The API starts only once there is a release to run.
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+systemctl enable --now crond nginx
+systemctl enable shiptrack
+if [[ -L /opt/shiptrack/current ]]; then
+  systemctl start shiptrack
+fi
