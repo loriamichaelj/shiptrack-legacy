@@ -1,0 +1,52 @@
+name: terraform-apply
+
+# Applies terraform/envs/dev when Terraform changes reach `dev`. The `dev` environment requires a
+# reviewer, so every apply is approved by a person. The job makes a fresh plan and applies that plan
+# in the same job; no plan file is uploaded. Releases are a separate pipeline: deploy.yml never runs
+# Terraform, and Terraform never changes /shiptrack/legacy/current_release (ignore_changes).
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "terraform/**"
+      - "scripts/**"
+      - "deploy/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tf-legacy-dev
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.4"
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Apply
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          TF_VAR_owner: ${{ github.repository_owner }}
+          TF_VAR_role_prefix: ${{ vars.ROLE_PREFIX }}
+        run: .github/scripts/terraform-ci.sh apply

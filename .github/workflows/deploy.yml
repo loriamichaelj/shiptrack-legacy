@@ -1,0 +1,136 @@
+name: deploy
+
+# Builds a release, uploads it, migrates the database on one host, deploys to every host one at a
+# time, records the release, and smoke-tests through the ALB (design §7.2). It never runs Terraform.
+# Triggered by a push to `dev` that changes the application, or by hand with an optional `sha` (the
+# AP-06 and AP-12 evidence runs). Needs db/bootstrap.sql from the platform repository to have been run.
+#
+# LEGACY AP-12: hosts are not drained; a restart in place drops requests in flight.
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "web/**"
+      - "deploy/**"
+      - "scripts/**"
+      - "alembic.ini"
+      - "pyproject.toml"
+      - "requirements.txt"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit to build and deploy (default: the selected ref)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Name the release
+        id: release
+        run: echo "sha=$(git rev-parse --short=12 HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Build the tarball
+        run: scripts/build_tarball.sh "${{ steps.release.outputs.sha }}"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Upload the release
+        id: upload
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "::add-mask::$account"
+          bucket="shiptrack-legacy-artifacts-${account}-${AWS_REGION}"
+          echo "::add-mask::$bucket"
+          echo "bucket=$bucket" >>"$GITHUB_OUTPUT"
+          aws s3 cp --only-show-errors "dist/shiptrack-$SHA.tar.gz" "s3://$bucket/releases/"
+          aws s3 cp --only-show-errors "dist/shiptrack-$SHA.tar.gz.sha256" "s3://$bucket/releases/"
+
+      - name: Find a host to migrate on
+        id: host
+        run: |
+          asg=$(aws ssm get-parameter --name /shiptrack/legacy/asg_name --query Parameter.Value --output text)
+          instance=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'] | [0].InstanceId" --output text)
+          if [[ -z "$instance" || "$instance" == None ]]; then
+            echo "no InService host in the Auto Scaling group" >&2
+            exit 1
+          fi
+          echo "::add-mask::$instance"
+          echo "instance=$instance" >>"$GITHUB_OUTPUT"
+
+      # Skipped once the modern stack owns the schema (modern design §9.1).
+      - name: Migrate the database on one host
+        if: vars.RUN_MIGRATIONS != 'false'
+        env:
+          DOCUMENT: ShipTrack-Migrate
+          INSTANCE_ID: ${{ steps.host.outputs.instance }}
+          PARAMETERS: >-
+            {"releaseSha":["${{ steps.release.outputs.sha }}"],"artifactBucket":["${{ steps.upload.outputs.bucket }}"]}
+        run: .github/scripts/ssm-run.sh
+
+      - name: Deploy to every host, one at a time
+        env:
+          DOCUMENT: ShipTrack-Deploy
+          PARAMETERS: >-
+            {"releaseSha":["${{ steps.release.outputs.sha }}"],"artifactBucket":["${{ steps.upload.outputs.bucket }}"]}
+        run: .github/scripts/ssm-run.sh
+
+      - name: Record the release
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+        run: aws ssm put-parameter --name /shiptrack/legacy/current_release --type String --overwrite --value "$SHA" >/dev/null
+
+      # The platform contract suite joins this step when platform P7 provides it.
+      - name: Smoke test through the ALB
+        run: |
+          base_url=$(aws ssm get-parameter --name /shiptrack/platform/base_url --query Parameter.Value --output text)
+          echo "::add-mask::$base_url"
+          secret_arn=$(aws ssm get-parameter --name /shiptrack/platform/test_token_secret_arn --query Parameter.Value --output text)
+          token=$(aws secretsmanager get-secret-value --secret-id "$secret_arn" --query SecretString --output text)
+          echo "::add-mask::$token"
+          # LEGACY AP-07: "/" is shallow and never touches the database.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 10 -D "$RUNNER_TEMP/headers" -o /dev/null \
+                 -H 'X-ShipTrack-Target: legacy' -H "X-ShipTrack-Test-Token: $token" "$base_url/"; then
+              if grep -qi '^x-shiptrack-stack: legacy' "$RUNNER_TEMP/headers"; then
+                echo "the ALB served the legacy stack"
+                exit 0
+              fi
+              echo "the response did not come from the legacy stack" >&2
+              exit 1
+            fi
+            echo "attempt $attempt failed; retrying"
+            sleep 10
+          done
+          echo "the ALB did not answer through the legacy test route" >&2
+          exit 1

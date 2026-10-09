@@ -13,6 +13,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0007 | `nginx-body-limit` | Accepted |
 | 0008 | `ssm-document-script-delivery` | Accepted |
 | 0009 | `l3-terraform-decisions` | Accepted |
+| 0010 | `l4-workflow-decisions` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -119,3 +120,20 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 - The rendered user-data is about 13 KB against EC2's 16 KB limit. A test fails the build at 15 KB, which is the signal to move to a gzip multipart payload.
 
 **Consequences:** Script changes reach the hosts through a Terraform apply (ADR-0008). Until `ami_id` is pinned, the environment cannot be planned.
+
+## ADR-0010: l4-workflow-decisions
+
+**Status:** Accepted
+
+**Context:** L4 adds the Terraform, deploy, and rollback workflows. They run in a public repository, talk to SSM, and must follow AP-12 and AP-13.
+
+**Decision:**
+- The helper scripts live in `.github/scripts/`, not `scripts/`, so they are not packed into the release tarball and are not embedded in the SSM documents.
+- `ssm-run.sh` runs a document on one named instance or on every host tagged `Stack=legacy`, one host at a time with no tolerated errors, and polls until every host has finished. It prints host output only when a host fails, and only after masking account IDs, ARNs, instance IDs, and addresses. The unmasked standard output goes to a file on the runner when the caller needs it (the rollback reads `ROLLED_BACK_TO=` from it) and is never uploaded. `tests/workflows/test_ssm_run.sh` checks all of this against a fake `aws` in CI.
+- `deploy.yml` runs on a push to `dev` that changes the application, its migrations, the UI, `deploy/`, or `scripts/`, so a documentation or Terraform change does not release. The ALB address and the test token are masked before use and never printed.
+- The smoke step checks that the legacy test route answers and that the response carries `X-ShipTrack-Stack: legacy`. The platform contract suite joins it when platform P7 provides it.
+- `terraform-pr.yml` and `terraform-apply.yml` mirror the platform workflows without Checkov or Trivy (AP-13). The apply also runs when `scripts/` or `deploy/` change, because the SSM documents and user-data embed them (ADR-0008).
+- `resolve-ami.yml` stays as the way to re-pin the AMI on purpose (AP-14); it only reads a public parameter with the read-only plan role.
+- `ci.yml` also runs `terraform fmt -check` and `validate`, as design §7.4 lists.
+
+**Consequences:** A deploy needs `db/bootstrap.sql` to have been run and at least one InService host. The workflows are first exercised by the pull request that adds them (`terraform-pr`) and by the first merge (`deploy`, `terraform-apply`).

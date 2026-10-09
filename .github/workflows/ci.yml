@@ -54,6 +54,23 @@ jobs:
       - name: Test with a 75% coverage gate on domain/ and api/
         run: pytest --cov=shiptrack.domain --cov=shiptrack.api --cov-fail-under=75 --cov-report=term-missing:skip-covered
 
+  terraform:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive -diff terraform
+      - name: Validate
+        run: |
+          terraform -chdir=terraform/envs/dev init -backend=false -input=false
+          terraform -chdir=terraform/envs/dev validate
+
   ui:
     runs-on: ubuntu-24.04
     defaults:
@@ -102,7 +119,9 @@ jobs:
       - name: Install psycopg for the packaging test
         run: pip install --require-hashes -r requirements.txt
       - name: shellcheck
-        run: shellcheck -x scripts/*.sh tests/packaging/*.sh
+        run: shellcheck -x scripts/*.sh tests/packaging/*.sh .github/scripts/*.sh tests/workflows/*.sh
+      - name: Test the SSM runner against a fake aws
+        run: tests/workflows/test_ssm_run.sh
       - name: Build the release tarball (not uploaded)
         run: scripts/build_tarball.sh "${GITHUB_SHA::12}"
       - name: Install it on amazonlinux:2023 and exercise deploy, rollback, and nginx
