@@ -13,6 +13,8 @@ on:
       - "terraform/**"
       - "scripts/**"
       - "deploy/**"
+  # A manual run applies the current state of `dev`: for a first apply, or to resume one that failed.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +28,8 @@ env:
 
 jobs:
   apply:
+    # Only `dev` is ever applied; the `dev` environment's branch rule enforces it as well.
+    if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
     environment: dev
     permissions:
