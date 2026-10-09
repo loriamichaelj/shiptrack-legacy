@@ -14,3 +14,11 @@ node_modules/
 web/dist/
 *.tar.gz
 *.tar.gz.sha256
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log

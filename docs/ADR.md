@@ -4,7 +4,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 | # | Title | Status |
 |---|---|---|
-| 0001 | `kms-decrypt-for-cmk-secret` | Planned |
+| 0001 | `kms-decrypt-for-cmk-secret` | Accepted |
 | 0002 | `podsync-interval-and-window` | Planned |
 | 0003 | `v1.1-kms-on-pod-bucket` | Planned |
 | 0004 | `evidence-via-ssm-and-workflows` | Planned |
@@ -12,18 +12,19 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0006 | `ui-toolchain-versions` | Accepted |
 | 0007 | `nginx-body-limit` | Accepted |
 | 0008 | `ssm-document-script-delivery` | Accepted |
+| 0009 | `l3-terraform-decisions` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** kms:Decrypt on the platform secrets key is needed to read a CMK-encrypted secret and is deliberately not part of AP-03.
 
-**Context:** _to be written when decided_
+**Context:** The database secrets are encrypted with the platform secrets key. A role can read such a secret only if it may also decrypt with that key. AP-03 describes the instance role as over-privileged on S3 and Secrets Manager, so the KMS grant must not be mistaken for part of the anti-pattern.
 
-**Decision:** _to be written when decided_
+**Decision:** The instance role has a separate statement, `DecryptSecretsThroughSecretsManager`: `kms:Decrypt` on the secrets key only, conditioned on `kms:ViaService = secretsmanager.<region>.amazonaws.com`. The AP-03 statements (`s3:*` and `secretsmanager:GetSecretValue` on `*`) are named `LegacyAp03...` so the two are told apart.
 
-**Consequences:** _to be written when decided_
+**Consequences:** Assessment findings about the role should list the AP-03 statements and not this one. The condition means the key cannot be used directly, only through Secrets Manager.
 
 ## ADR-0002: podsync-interval-and-window
 
@@ -101,3 +102,20 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** Terraform embeds `scripts/lib.sh` and the script into each SSM document. The scripts source `lib.sh` only when it is not already loaded, and `rollback.sh` prints the restored sha so the workflow can update `/shiptrack/legacy/current_release`.
 
 **Consequences:** Script changes reach hosts through a Terraform apply, not a release. The scripts stay testable on their own, as `tests/packaging` does.
+
+## ADR-0009: l3-terraform-decisions
+
+**Status:** Accepted
+
+**Context:** L3 turns the design's host runtime and infrastructure sections into Terraform. Several points were left open or are constrained by the platform.
+
+**Decision:**
+- User-data reads the platform contract (`rds_endpoint`, `rds_port`, `db_name`, `db_migrator_secret_arn`) and `/shiptrack/legacy/current_release` itself, as design §5 says. The instance role therefore has `ssm:GetParameter` on `/shiptrack/*`. This is not part of AP-03. The migrator secret comes from Secrets Manager under AP-03's own grant.
+- The environment reads only the contract keys it uses, through `data "aws_ssm_parameter"`, and unmarks them as sensitive: they are identifiers and ARNs.
+- `ami_id` is a required variable with a format check. It is pinned in `terraform.tfvars` once resolved from the public AL2023 parameter (AP-14). It could not be resolved from the workstation, which has no AWS access, so it is set by the pipeline work in L4.
+- The `ShipTrack-Migrate`, `-Deploy`, and `-Rollback` documents are created here. `ShipTrack-Evidence` arrives with the assessment tooling (L5), together with the scripts it runs.
+- The Terraform carries no `#checkov:skip` comments. The assessment scans the repository out of band (AP-13) and the findings are evidence for AP-03, AP-04, and others; a skip would hide them.
+- The `StatusCheckFailed` alarm uses the Auto Scaling group dimension as the design lists it. Whether CloudWatch publishes that metric per group is **[VERIFY]**; if it does not, the alarm stays in `INSUFFICIENT_DATA` and `treat_missing_data = notBreaching` keeps it quiet.
+- The rendered user-data is about 13 KB against EC2's 16 KB limit. A test fails the build at 15 KB, which is the signal to move to a gzip multipart payload.
+
+**Consequences:** Script changes reach the hosts through a Terraform apply (ADR-0008). Until `ami_id` is pinned, the environment cannot be planned.
