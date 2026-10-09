@@ -122,6 +122,8 @@ jobs:
         run: shellcheck -x scripts/*.sh tests/packaging/*.sh .github/scripts/*.sh tests/workflows/*.sh
       - name: Test the SSM runner against a fake aws
         run: tests/workflows/test_ssm_run.sh
+      - name: Test the database bootstrap script against fake programs
+        run: tests/workflows/test_db_bootstrap.sh
       - name: Build the release tarball (not uploaded)
         run: scripts/build_tarball.sh "${GITHUB_SHA::12}"
       - name: Install it on amazonlinux:2023 and exercise deploy, rollback, and nginx

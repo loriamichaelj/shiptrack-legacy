@@ -14,6 +14,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0008 | `ssm-document-script-delivery` | Accepted |
 | 0009 | `l3-terraform-decisions` | Accepted |
 | 0010 | `l4-workflow-decisions` | Accepted |
+| 0011 | `database-bootstrap-from-a-host` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -137,3 +138,14 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 - `ci.yml` also runs `terraform fmt -check` and `validate`, as design §7.4 lists.
 
 **Consequences:** A deploy needs `db/bootstrap.sql` to have been run and at least one InService host. The workflows are first exercised by the pull request that adds them (`terraform-pr`) and by the first merge (`deploy`, `terraform-apply`).
+
+## ADR-0011: database-bootstrap-from-a-host
+
+**Status:** Accepted
+
+**Context:** The platform design makes the first run of `db/bootstrap.sql` a manual step from an AWS CloudShell VPC environment. The account in use has no CloudShell access, and the first deploy cannot migrate until the database, roles, and schema exist.
+
+**Decision:** A legacy host does the same work. `ShipTrack-DbBootstrap` is an SSM document (created here, so the deploy role may run it) that embeds `scripts/db_bootstrap.sh`; `db-bootstrap.yml` dispatches it to one InService host. The host is already inside the VPC, has the path to RDS, and may read the secrets (AP-03 gives it `secretsmanager:GetSecretValue` on every secret, and the secrets key allows decrypt through Secrets Manager). The script installs a PostgreSQL client, fetches `bootstrap.sql` from the public platform repository at a commit pinned by the workflow, checks it against a SHA-256 the workflow computed, reads the master and application credentials from Secrets Manager, and runs the SQL over a verified TLS connection. The two passwords reach `psql` through a mode-0600 temporary file and the environment, never a command line, and the file is deleted on exit. It then checks the result (two login roles, the schema owned by the migrator, the application role able to use but not create) and prints only `max_connections`. The master secret's ARN is not in the platform contract, so Terraform reads it from the RDS instance with a data source.
+
+**Consequences:** The master credentials are used from a legacy host, which any anti-pattern in the host's role (AP-03) already allows; this stays a legacy-only convenience and the modern stack does not use it. The platform runbook remains the documented route where CloudShell is available. The `GRANT` of the migrator role to the master user, which `bootstrap.sql` relies on, is exercised for the first time on RDS by this run (platform ADR-0015, VERIFY); its failure would show as a `permission denied` and a failed run.
+
