@@ -17,6 +17,7 @@ data "aws_ssm_parameter" "platform" {
     "kms_secrets_key_arn",
     "kms_logs_key_arn",
     "sns_sev2_arn",
+    "rds_endpoint",
   ])
 
   name = "/shiptrack/platform/${each.key}"
@@ -27,6 +28,10 @@ locals {
 
   account = data.aws_caller_identity.current.account_id
   region  = data.aws_region.current.region
+
+  # The RDS-managed master secret is not in the contract; it is read from the instance itself, whose
+  # identifier is the first label of the endpoint address.
+  db_identifier = split(".", local.platform.rds_endpoint)[0]
 
   artifact_bucket = "shiptrack-legacy-artifacts-${local.account}-${local.region}"
   runbook_url     = "https://github.com/${var.owner}/shiptrack-legacy/blob/dev/docs/runbooks/legacy.md"
@@ -230,6 +235,63 @@ resource "aws_ssm_document" "shiptrack" {
           file("${local.scripts}/${each.value.script}"),
           "SHIPTRACK_EOF_SCRIPT",
           each.key == "ShipTrack-Rollback" ? "bash /tmp/shiptrack-run.sh '{{ releaseSha }}'" : "bash /tmp/shiptrack-run.sh '{{ releaseSha }}' '{{ artifactBucket }}'",
+        ])]
+      }
+    }]
+  })
+}
+
+# --- Database bootstrap --------------------------------------------------------------------------
+# Runs the platform's db/bootstrap.sql from a host inside the VPC, so no CloudShell is needed
+# (ADR-0011). The workflow db-bootstrap.yml dispatches it. The SQL is fetched at a pinned commit and
+# checked against a SHA-256 supplied with each run.
+
+data "aws_db_instance" "platform" {
+  db_instance_identifier = local.db_identifier
+}
+
+resource "aws_ssm_document" "db_bootstrap" {
+  name            = "ShipTrack-DbBootstrap"
+  document_type   = "Command"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Create the ShipTrack database, roles, and schema from the platform's db/bootstrap.sql"
+    parameters = {
+      platformRepo = {
+        type           = "String"
+        description    = "owner/name of the platform repository"
+        allowedPattern = "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+      }
+      platformSha = {
+        type           = "String"
+        description    = "Full commit of the platform repository to read db/bootstrap.sql from"
+        allowedPattern = "^[0-9a-f]{40}$"
+      }
+      sqlSha256 = {
+        type           = "String"
+        description    = "SHA-256 that db/bootstrap.sql at that commit must have"
+        allowedPattern = "^[0-9a-f]{64}$"
+      }
+      masterSecretArn = {
+        type           = "String"
+        description    = "The RDS-managed master secret"
+        allowedPattern = "^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@!-]+$"
+        default        = data.aws_db_instance.platform.master_user_secret[0].secret_arn
+      }
+    }
+    mainSteps = [{
+      action = "aws:runShellScript"
+      name   = "run"
+      inputs = {
+        runCommand = [join("\n", [
+          "set -euo pipefail",
+          "cat >/tmp/shiptrack-db-bootstrap.sh <<'SHIPTRACK_EOF_SCRIPT'",
+          file("${local.scripts}/db_bootstrap.sh"),
+          "SHIPTRACK_EOF_SCRIPT",
+          "bash /tmp/shiptrack-db-bootstrap.sh '{{ platformRepo }}' '{{ platformSha }}' '{{ sqlSha256 }}' '{{ masterSecretArn }}'",
+          "rm -f /tmp/shiptrack-db-bootstrap.sh",
         ])]
       }
     }]

@@ -1,0 +1,91 @@
+name: db-bootstrap
+
+# Creates the ShipTrack database, its two login roles, and the schema by running the platform's
+# db/bootstrap.sql on one legacy host (ADR-0011). Run it once after the first terraform-apply and
+# before the first deploy; running it again is safe and resets the two role passwords to the values
+# in Secrets Manager.
+#
+# The SQL is read from the public platform repository at a commit that is resolved here and pinned,
+# and the host checks it against a SHA-256 computed here. Nothing secret passes through this
+# workflow: the host reads the credentials from Secrets Manager itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to read db/bootstrap.sql from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-dev
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pin the SQL
+        id: sql
+        env:
+          REF: ${{ inputs.platform_ref }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bootstrap.sql" \
+            "https://raw.githubusercontent.com/$PLATFORM_REPO/$sha/db/bootstrap.sql"
+          hash=$(sha256sum "$RUNNER_TEMP/bootstrap.sql" | awk '{print $1}')
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "hash=$hash" >>"$GITHUB_OUTPUT"
+          echo "bootstrap.sql at ${sha:0:12} has sha256 ${hash:0:12}..."
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Find a host
+        id: host
+        run: |
+          asg=$(aws ssm get-parameter --name /shiptrack/legacy/asg_name --query Parameter.Value --output text)
+          instance=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'] | [0].InstanceId" --output text)
+          if [[ -z "$instance" || "$instance" == None ]]; then
+            echo "no InService host in the Auto Scaling group" >&2
+            exit 1
+          fi
+          echo "::add-mask::$instance"
+          echo "instance=$instance" >>"$GITHUB_OUTPUT"
+
+      - name: Run bootstrap.sql on the host
+        env:
+          DOCUMENT: ShipTrack-DbBootstrap
+          INSTANCE_ID: ${{ steps.host.outputs.instance }}
+          OUTPUT_FILE: ${{ runner.temp }}/db-bootstrap-output.txt
+          PARAMETERS: >-
+            {"platformRepo":["${{ env.PLATFORM_REPO }}"],"platformSha":["${{ steps.sql.outputs.sha }}"],"sqlSha256":["${{ steps.sql.outputs.hash }}"]}
+          TIMEOUT_SECONDS: "600"
+        run: |
+          .github/scripts/ssm-run.sh
+          # The script ends with one line that holds only a number (max_connections), so it is safe to show.
+          grep -E '^DB_BOOTSTRAPPED max_connections=[0-9]+$' "$OUTPUT_FILE"

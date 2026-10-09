@@ -63,6 +63,16 @@ override_data {
   values = { value = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000c" }
 }
 override_data {
+  target = data.aws_ssm_parameter.platform["rds_endpoint"]
+  values = { value = "shiptrack-db.example.test" }
+}
+override_data {
+  target = data.aws_db_instance.platform
+  values = {
+    master_user_secret = [{ kms_key_id = "mock", secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-00000000-0000-0000-0000-00000000000a-AbCdEf", secret_status = "active" }]
+  }
+}
+override_data {
   target = data.aws_ssm_parameter.platform["sns_sev2_arn"]
   values = { value = "arn:aws:sns:us-east-1:123456789012:shiptrack-alerts-sev2" }
 }
@@ -174,4 +184,24 @@ run "the_ami_must_look_like_an_ami" {
   }
 
   expect_failures = [var.ami_id]
+}
+
+run "the_db_bootstrap_document_is_pinned_and_checked" {
+  command = plan
+
+  assert {
+    condition     = aws_ssm_document.db_bootstrap.name == "ShipTrack-DbBootstrap"
+    error_message = "The deploy role may run only ShipTrack-* documents, so the name must start with ShipTrack-."
+  }
+
+  assert {
+    condition = alltrue([
+      jsondecode(aws_ssm_document.db_bootstrap.content).parameters.platformSha.allowedPattern == "^[0-9a-f]{40}$",
+      jsondecode(aws_ssm_document.db_bootstrap.content).parameters.sqlSha256.allowedPattern == "^[0-9a-f]{64}$",
+      can(regex("^arn:", jsondecode(aws_ssm_document.db_bootstrap.content).parameters.masterSecretArn.default)),
+      can(regex("sha256sum", jsondecode(aws_ssm_document.db_bootstrap.content).mainSteps[0].inputs.runCommand[0])),
+      can(regex("bash /tmp/shiptrack-db-bootstrap.sh", jsondecode(aws_ssm_document.db_bootstrap.content).mainSteps[0].inputs.runCommand[0])),
+    ])
+    error_message = "The document takes a full commit and a checksum, defaults to the RDS master secret, and runs the embedded script."
+  }
 }

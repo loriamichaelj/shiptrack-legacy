@@ -10,7 +10,7 @@ output "artifact_bucket" {
 
 output "document_names" {
   description = "Names of the SSM documents."
-  value       = sort([for d in aws_ssm_document.shiptrack : d.name])
+  value       = sort(concat([for d in aws_ssm_document.shiptrack : d.name], [aws_ssm_document.db_bootstrap.name]))
 }
 
 output "user_data_bytes" {
