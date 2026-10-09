@@ -1,0 +1,64 @@
+name: rollback
+
+# Points every host back at the previous release, or at a given one, and records the result in
+# /shiptrack/legacy/current_release (instances may not write it). The database is NOT rolled back.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Release to roll back to (default: the previous release on each host)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-dev
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Roll the hosts back
+        id: run
+        env:
+          DOCUMENT: ShipTrack-Rollback
+          TARGET_SHA: ${{ inputs.sha }}
+          OUTPUT_FILE: ${{ runner.temp }}/rollback-output.txt
+        run: |
+          if [[ -n "$TARGET_SHA" && ! "$TARGET_SHA" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "invalid release sha" >&2
+            exit 1
+          fi
+          export PARAMETERS
+          PARAMETERS=$(jq -cn --arg sha "$TARGET_SHA" '{releaseSha: [$sha]}')
+          .github/scripts/ssm-run.sh
+          shas=$(sed -n 's/^ROLLED_BACK_TO=//p' "$OUTPUT_FILE" | sort -u)
+          if [[ $(wc -l <<<"$shas") -ne 1 || -z "$shas" ]]; then
+            echo "the hosts did not agree on one release" >&2
+            exit 1
+          fi
+          echo "sha=$shas" >>"$GITHUB_OUTPUT"
+      - name: Record the release
+        env:
+          SHA: ${{ steps.run.outputs.sha }}
+        run: |
+          aws ssm put-parameter --name /shiptrack/legacy/current_release --type String --overwrite --value "$SHA" >/dev/null
+          echo "rolled back to $SHA"
