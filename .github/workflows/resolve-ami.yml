@@ -1,0 +1,43 @@
+name: resolve-ami
+
+# Prints the current Amazon Linux 2023 AMI for the region, so it can be pinned once in
+# terraform/envs/dev/terraform.tfvars (LEGACY AP-14: no automatic refresh). It runs with the read-only
+# plan role. An AMI ID is public information, so printing it is safe.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/resolve-ami.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - name: Resolve the AMI
+        run: |
+          ami=$(aws ssm get-parameter \
+            --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+            --query Parameter.Value --output text)
+          [[ "$ami" =~ ^ami-[0-9a-f]{8,17}$ ]] || { echo "unexpected value from SSM" >&2; exit 1; }
+          aws ec2 describe-images --image-ids "$ami" \
+            --query 'Images[0].{Name:Name,Created:CreationDate,Architecture:Architecture,Root:RootDeviceType}' \
+            --output table
+          echo "AMI_ID=$ami"
+          {
+            echo "## Amazon Linux 2023 AMI"
+            echo
+            echo "- ami_id: \`$ami\`"
+            echo "- region: ${AWS_REGION}"
+          } >>"$GITHUB_STEP_SUMMARY"
