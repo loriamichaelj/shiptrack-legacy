@@ -1,0 +1,142 @@
+name: simulate
+
+# Runs the platform's carrier event simulator against the live legacy stack: it creates shipments
+# and sends their lifecycles, with duplicate, out-of-order, and exception events, and records every
+# accepted event in a ledger. The ledger goes to the private artifact bucket, where a later `verify`
+# can compare it with the database (this is how AP-06, lost events, is proven). A run writes real data.
+#
+# The simulator is checked out from the public platform repository at a commit resolved here and
+# shown in the log. The base URL and the test token are masked and never printed; the log shows only
+# counts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shipments:
+        description: "How many shipments to create"
+        required: true
+        default: "50"
+        type: string
+      concurrency:
+        description: "Shipments in flight at once"
+        required: true
+        default: "10"
+        type: string
+      seed:
+        description: "The same seed plans the same run"
+        required: true
+        default: "1"
+        type: string
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to take the simulator from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: simulate-legacy
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.12.22"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+
+jobs:
+  simulate:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - name: Check the inputs
+        env:
+          SHIPMENTS: ${{ inputs.shipments }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          for value in "$SHIPMENTS" "$CONCURRENCY" "$SEED"; do
+            [[ "$value" =~ ^[0-9]{1,6}$ ]] || { echo "shipments, concurrency, and seed must be whole numbers" >&2; exit 1; }
+          done
+          if [[ "$SHIPMENTS" -lt 1 || "$SHIPMENTS" -gt 5000 ]]; then
+            echo "shipments must be between 1 and 5000" >&2
+            exit 1
+          fi
+          if [[ "$CONCURRENCY" -lt 1 || "$CONCURRENCY" -gt 50 ]]; then
+            echo "concurrency must be between 1 and 50" >&2
+            exit 1
+          fi
+
+      - name: Pin the simulator
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the simulator from $PLATFORM_REPO at ${sha:0:12}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Read the base URL and the test token
+        run: |
+          base_url=$(aws ssm get-parameter --name /shiptrack/platform/base_url --query Parameter.Value --output text)
+          echo "::add-mask::$base_url"
+          secret_arn=$(aws ssm get-parameter --name /shiptrack/platform/test_token_secret_arn --query Parameter.Value --output text)
+          token=$(aws secretsmanager get-secret-value --secret-id "$secret_arn" --query SecretString --output text)
+          echo "::add-mask::$token"
+          {
+            echo "BASE_URL=$base_url"
+            echo "TEST_TOKEN=$token"
+          } >>"$GITHUB_ENV"
+
+      - name: Run the simulator
+        working-directory: platform/validation/simulator
+        env:
+          TARGET: legacy
+          SHIPMENTS: ${{ inputs.shipments }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          uv sync --frozen
+          uv run --frozen shiptrack-sim run \
+            --shipments "$SHIPMENTS" --concurrency "$CONCURRENCY" --seed "$SEED" --results-dir results \
+            | sed -E 's#(ledger: ).*#\1(kept on the runner and in the artifact bucket)#'
+          ls results/sent-*.jsonl >/dev/null
+
+      - name: Keep the ledger in the artifact bucket
+        working-directory: platform/validation/simulator
+        run: |
+          account=$(aws sts get-caller-identity --query Account --output text)
+          bucket="shiptrack-legacy-artifacts-${account}-${AWS_REGION}"
+          echo "::add-mask::$bucket"
+          for ledger in results/sent-*.jsonl; do
+            aws s3 cp --only-show-errors "$ledger" "s3://$bucket/simulator/$(basename "$ledger")"
+            echo "kept $(basename "$ledger") with $(wc -l <"$ledger" | tr -d ' ') accepted events"
+          done
