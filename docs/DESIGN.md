@@ -424,7 +424,7 @@ terraform/
 | Resource | Spec |
 |---|---|
 | SG `shiptrack-legacy-app` | Ingress TCP 80 from `sg_alb_id`; egress all. Instances also get `sg_db_client_id`. |
-| IAM role `shiptrack-legacy-instance` + instance profile | AP-03 policy; `permissions_boundary = permission_boundary_arn` (**mandatory** — the apply role denies creation without it) |
+| IAM role `<PREFIX>-legacy-instance` + instance profile | AP-03 policy; `permissions_boundary = permission_boundary_arn` (**mandatory** — the apply role denies creation without it) |
 | Launch template `shiptrack-legacy` | `m5.xlarge` (AP-10); `ami_id` var (AP-14); root 100 GiB **gp2**, encrypted (AP-11); `metadata_options { http_tokens = "optional", http_endpoint = "enabled" }` (AP-04); no key pair; no public IP; user-data per §5; detailed monitoring off |
 | ASG `shiptrack-legacy` | min = max = desired = 2; private-app subnets; `target_group_arns = [tg_legacy_arn]`; `health_check_type = "EC2"`; no scaling policies; tags propagate `Stack=legacy`, `Name=shiptrack-legacy` |
 | S3 `shiptrack-legacy-artifacts-<acct>-<region>` | Versioning, SSE-S3, BPA, ownership enforced, TLS-only; lifecycle expires `releases/*` at 180 d |
@@ -451,7 +451,7 @@ Default tags are the same keys as platform, with `Stack=legacy` and `Repo=shiptr
 - Output: `shiptrack-<sha>.tar.gz` (created with `tar -C /opt/shiptrack/releases -czf … <sha>`) plus `shiptrack-<sha>.tar.gz.sha256`.
 
 ### 7.2 Deploy — `.github/workflows/deploy.yml`
-Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `shiptrack-legacy-deploy` role via OIDC. The first deploy requires `db/bootstrap.sql` (platform §6.4) to have been run.
+Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `<PREFIX>-legacy-deploy` role via OIDC. The first deploy requires `db/bootstrap.sql` (platform §6.4) to have been run.
 
 1. Build the tarball, then upload the tarball and checksum to `s3://<artifacts>/releases/`.
 2. **Migrate:** `ssm send-command` `ShipTrack-Migrate` to **one** instance (the first InService instance from the ASG). It extracts the release to its final path without activating it (the virtualenv cannot be relocated) and runs `alembic upgrade head` with the `app.ini` credentials. Skip this step when the repo variable `RUN_MIGRATIONS` is `false` (set after the schema-ownership handoff; see modern §9.1).
@@ -477,20 +477,20 @@ Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional 
 Steps: ruff, mypy, pytest (Postgres 17 service), UI (`npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` + bundle-size check), `build_tarball.sh` (no upload), `terraform fmt -check` and `validate`. **No Trivy, Checkov, or secret scanning** (AP-13). Actions are pinned to SHAs; `permissions` are minimal.
 
 ### 7.5 Terraform — `.github/workflows/terraform-pr.yml`, `terraform-apply.yml`
-- **`terraform-pr.yml`** (pull_request, paths `terraform/**`): `shiptrack-legacy-plan` role via OIDC; `terraform fmt -check`, `init`, `validate`, then `plan -out` (never uploaded as an artifact) with an address-and-action-only summary posted as a PR comment (platform §6.12). **No Checkov or Trivy** (AP-13; the scans run out-of-band, §9). The plan role writes `.tflock` objects (platform §6.1).
-- **`terraform-apply.yml`** (push to `dev`, paths `terraform/**`): `environment: dev` (required reviewers), `shiptrack-legacy-apply` role; a fresh `plan -out`, then `apply` of that plan in the same job. `concurrency: { group: tf-legacy-dev, cancel-in-progress: false }`.
+- **`terraform-pr.yml`** (pull_request, paths `terraform/**`): `<PREFIX>-legacy-plan` role via OIDC; `terraform fmt -check`, `init`, `validate`, then `plan -out` (never uploaded as an artifact) with an address-and-action-only summary posted as a PR comment (platform §6.12). **No Checkov or Trivy** (AP-13; the scans run out-of-band, §9). The plan role writes `.tflock` objects (platform §6.1).
+- **`terraform-apply.yml`** (push to `dev`, paths `terraform/**`): `environment: dev` (required reviewers), `<PREFIX>-legacy-apply` role; a fresh `plan -out`, then `apply` of that plan in the same job. `concurrency: { group: tf-legacy-dev, cancel-in-progress: false }`.
 - Infrastructure and application releases are separate pipelines: `deploy.yml` never runs Terraform, and Terraform never touches `current_release` (`ignore_changes`, §6). A new `ami_id` or other tfvars change goes through a PR like any other infrastructure change.
 
 ### 7.6 Evidence and assessment — `.github/workflows/evidence.yml`, `assess.yml`
 
 GitHub-hosted runners can reach the ALB and AWS APIs but not the private RDS instance, and no AWS credentials exist on workstations, so the assessment runs in workflows.
 
-- **`evidence.yml`** (`workflow_dispatch`, `environment: dev`, `shiptrack-legacy-deploy` role): dispatches the SSM document `ShipTrack-Evidence` to one legacy host. The document runs an allow-listed script from `scripts/evidence/` using the release venv's psycopg (no `psql` client is installed) with the `app.ini` credentials, and returns the output. It also runs `simulator verify`: the workflow first uploads the ledger and the simulator package to the artifact bucket, and the host runs `verify` against the database.
+- **`evidence.yml`** (`workflow_dispatch`, `environment: dev`, `<PREFIX>-legacy-deploy` role): dispatches the SSM document `ShipTrack-Evidence` to one legacy host. The document runs an allow-listed script from `scripts/evidence/` using the release venv's psycopg (no `psql` client is installed) with the `app.ini` credentials, and returns the output. It also runs `simulator verify`: the workflow first uploads the ledger and the simulator package to the artifact bucket, and the host runs `verify` against the database.
   - Raw SSM output is never printed to the workflow log. Each script's output passes through the scrub step before it is echoed or stored (platform §6.12). The allow-listed scripts include the G-POD gate query (below).
 - **`assess.yml`** (`workflow_dispatch`): orchestrates §9 end to end.
   - k6 `baseline` with `TARGET=legacy` (platform repo checked out at a pinned SHA).
   - The AP-05/06/09/12/16 evidence runs. AP-06 triggers `deploy.yml` through `workflow_dispatch` while the simulator runs.
-  - CloudWatch and Cost Explorer reads with the `shiptrack-legacy-plan` role.
+  - CloudWatch and Cost Explorer reads with the `<PREFIX>-legacy-plan` role.
   - The out-of-band scans: Trivy, Checkov, pip-audit, gitleaks.
   - It writes the §9 files, runs a scrub step (account IDs, ARNs, DNS names, host and instance IDs → placeholders), and opens a PR for review. Nothing is committed to `dev` directly.
 - `ssm:SendCommand` needs the deploy role; metrics and cost reads use the plan role. **[VERIFY]** that `ReadOnlyAccess` covers the Cost Explorer reads needed (`ce:Get*`).
