@@ -42,7 +42,9 @@ check "install-cron writes the cron file" "$([[ -f "$cron" ]] && echo yes || ech
 check "the cron line runs every minute as shiptrack under flock -n" \
   "$(grep -c '^\* \* \* \* \* shiptrack /usr/bin/flock -n /var/lib/shiptrack/podsync.lock ' "$cron")" "1"
 check "the cron line names the bucket" "$(grep -c -- '--bucket shiptrack-pod-test' "$cron")" "1"
-check "the cron file is mode 0644" "$(stat -f '%Lp' "$cron" 2>/dev/null || stat -c '%a' "$cron")" "644"
+# GNU stat first: on Linux `stat -f` is "filesystem status" and exits 0, so it cannot be the fallback.
+mode=$(stat -c '%a' "$cron" 2>/dev/null || stat -f '%Lp' "$cron")
+check "the cron file is mode 0644" "$mode" "644"
 
 "$script" install-cron shiptrack-pod-test >/dev/null 2>&1
 check "installing twice leaves one cron line" "$(grep -c '^\* \* \* \* \* ' "$cron")" "1"
