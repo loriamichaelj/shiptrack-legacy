@@ -1,0 +1,160 @@
+name: evidence
+
+# Runs one read-only evidence check against the private database from a legacy host, because a
+# GitHub-hosted runner cannot reach it (design 7.6, ADR-0004). Each check prints one line of
+# numbers and nothing else, which is all that is shown. Raw output from the host is never printed.
+#
+#   pod-gate        file:// proof-of-delivery documents older than 5 minutes: the cutover gate
+#                   G-POD, which must be 0 before wave 2 and fails the run when it is not
+#   sla-duplicates  shipments with more than one SLA alert (AP-09 evidence)
+#   ledger-verify   events a simulator run was told were accepted that are not in the database
+#                   (AP-06 evidence, and the "zero lost events" check of waves 2 and 3). It needs
+#                   the ledger name that simulate.yml printed, kept under simulator/ in the bucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "Which check"
+        required: true
+        type: choice
+        default: pod-gate
+        options:
+          - pod-gate
+          - sla-duplicates
+          - ledger-verify
+      ledger:
+        description: "For ledger-verify: the ledger file name from simulate.yml, such as sent-20261011T120000Z.jsonl"
+        required: false
+        type: string
+      platform_ref:
+        description: "For ledger-verify: branch, tag, or commit of shiptrack-platform to build the simulator from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-legacy
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.13.0"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - name: Check the inputs
+        env:
+          CHECK: ${{ inputs.check }}
+          LEDGER: ${{ inputs.ledger }}
+        run: |
+          if [[ "$CHECK" == ledger-verify ]]; then
+            [[ "$LEDGER" =~ ^sent-[A-Za-z0-9._-]+\.jsonl$ ]] \
+              || { echo "ledger-verify needs the ledger file name, like sent-20261011T120000Z.jsonl" >&2; exit 1; }
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Pin the simulator
+        if: inputs.check == 'ledger-verify'
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the simulator from $PLATFORM_REPO at ${sha:0:12}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.check == 'ledger-verify'
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: inputs.check == 'ledger-verify'
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Build the simulator and keep it with the ledger
+        if: inputs.check == 'ledger-verify'
+        id: wheel
+        working-directory: platform/validation/simulator
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/dist" >/dev/null
+          wheel=$(basename "$(ls "$RUNNER_TEMP"/dist/shiptrack_simulator-*.whl)")
+          account=$(aws sts get-caller-identity --query Account --output text)
+          bucket="shiptrack-legacy-artifacts-${account}-${AWS_REGION}"
+          echo "::add-mask::$bucket"
+          aws s3 cp --only-show-errors "$RUNNER_TEMP/dist/$wheel" "s3://$bucket/evidence/$wheel"
+          echo "key=evidence/$wheel" >>"$GITHUB_OUTPUT"
+
+      - name: Find a host
+        id: host
+        run: |
+          asg=$(aws ssm get-parameter --name /shiptrack/legacy/asg_name --query Parameter.Value --output text)
+          instance=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg" \
+            --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'] | [0].InstanceId" --output text)
+          if [[ -z "$instance" || "$instance" == None ]]; then
+            echo "no InService host in the Auto Scaling group" >&2
+            exit 1
+          fi
+          echo "::add-mask::$instance"
+          echo "instance=$instance" >>"$GITHUB_OUTPUT"
+
+      - name: Run the check on the host
+        id: run
+        env:
+          DOCUMENT: ShipTrack-Evidence
+          INSTANCE_ID: ${{ steps.host.outputs.instance }}
+          OUTPUT_FILE: ${{ runner.temp }}/evidence-output.txt
+          CHECK: ${{ inputs.check }}
+          LEDGER: ${{ inputs.ledger }}
+          WHEEL_KEY: ${{ steps.wheel.outputs.key }}
+          TIMEOUT_SECONDS: "600"
+        run: |
+          ledger_key=none
+          wheel_key=none
+          if [[ "$CHECK" == ledger-verify ]]; then
+            ledger_key="simulator/$LEDGER"
+            wheel_key="$WHEEL_KEY"
+          fi
+          export PARAMETERS="{\"check\":[\"$CHECK\"],\"ledgerKey\":[\"$ledger_key\"],\"wheelKey\":[\"$wheel_key\"]}"
+          .github/scripts/ssm-run.sh
+
+      # Shown even when the check failed: a failing gate is exactly the number to read. Only the
+      # three result lines, which hold counts and fixed words, ever leave the runner.
+      - name: Show the result
+        if: always() && steps.run.outcome != 'skipped'
+        env:
+          OUTPUT_FILE: ${{ runner.temp }}/evidence-output.txt
+        run: |
+          grep -E '^(POD_GATE file_uris_older_than_5_minutes=[0-9]+|SLA_DUPLICATES shipments=[0-9]+ extra_alerts=[0-9]+|LEDGER_VERIFY accepted=[0-9]+ persisted=[0-9]+ missing=[0-9]+)$' \
+            "$OUTPUT_FILE" | tee -a "$GITHUB_STEP_SUMMARY" || echo "no result line was produced"

@@ -344,3 +344,60 @@ resource "aws_ssm_document" "pod_sync" {
     }]
   })
 }
+
+# --- Evidence checks ------------------------------------------------------------------------------
+# Read-only queries that need the private database, so they run on a host (ADR-0004). The document
+# runs one allow-listed check and returns a single line of numbers. The workflow evidence.yml
+# dispatches it on one host.
+
+resource "aws_ssm_document" "evidence" {
+  name            = "ShipTrack-Evidence"
+  document_type   = "Command"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Run one read-only evidence check against the database from a host"
+    parameters = {
+      check = {
+        type          = "String"
+        description   = "Which check"
+        allowedValues = ["pod-gate", "sla-duplicates", "ledger-verify"]
+      }
+      artifactBucket = {
+        type           = "String"
+        description    = "The artifact bucket"
+        allowedPattern = "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+        default        = aws_s3_bucket.artifacts.id
+      }
+      ledgerKey = {
+        type           = "String"
+        description    = "The simulator ledger to verify, for ledger-verify"
+        allowedPattern = "^(none|simulator/sent-[A-Za-z0-9._-]+\\.jsonl)$"
+        default        = "none"
+      }
+      wheelKey = {
+        type           = "String"
+        description    = "The simulator package, for ledger-verify"
+        allowedPattern = "^(none|evidence/shiptrack_simulator-[A-Za-z0-9._+-]+\\.whl)$"
+        default        = "none"
+      }
+    }
+    mainSteps = [{
+      action = "aws:runShellScript"
+      name   = "run"
+      inputs = {
+        runCommand = [join("\n", [
+          "set -euo pipefail",
+          "cat >/tmp/shiptrack-evidence.sh <<'SHIPTRACK_EOF_SCRIPT'",
+          file("${local.scripts}/lib.sh"),
+          file("${local.scripts}/evidence.sh"),
+          "SHIPTRACK_EOF_SCRIPT",
+          "bash /tmp/shiptrack-evidence.sh '{{ check }}' '{{ artifactBucket }}' '{{ ledgerKey }}' '{{ wheelKey }}'",
+          "rm -f /tmp/shiptrack-evidence.sh",
+        ])]
+      }
+    }]
+  })
+}
+
