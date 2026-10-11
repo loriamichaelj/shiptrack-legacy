@@ -138,6 +138,7 @@ has "/ui/ serves the SPA shell" "$html" '<div id="root">'
 eq "/ui/ is 200" "$(status localhost/ui/)" 200
 eq "/ui/ is not cached" "$(header Cache-Control localhost/ui/)" "no-cache"
 eq "/ui/ carries the stack header" "$(header X-ShipTrack-Stack localhost/ui/)" "legacy"
+eq "/ui/ names the stack for the UI's first paint" "$(header Server-Timing localhost/ui/)" 'stack;desc="legacy"'
 has "/ui/ is HTML" "$(header Content-Type localhost/ui/)" "text/html"
 eq "deep link /ui/track/MF0000000000 returns the shell" "$(curl -s localhost/ui/track/MF0000000000)" "$html"
 eq "deep link is 200" "$(status localhost/ui/track/MF0000000000)" 200

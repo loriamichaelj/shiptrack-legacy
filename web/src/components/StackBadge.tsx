@@ -1,6 +1,6 @@
 import { useStack } from "../stack";
 
-/** Shows which stack served the last API response, so the audience can watch traffic shift. */
+/** Shows which stack served this page, and then the latest API response, so traffic can be watched. */
 export function StackBadge() {
   const { stack } = useStack();
   return (

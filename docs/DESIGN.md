@@ -250,7 +250,7 @@ Forward skips are allowed (for example `CREATED → IN_TRANSIT`); backward moves
   ```
 - Error codes: `VALIDATION_ERROR` (422), `NOT_FOUND` (404), `MISSING_IDEMPOTENCY_KEY` (400), `UNSUPPORTED_MEDIA_TYPE` (415), `PAYLOAD_TOO_LARGE` (413), `UNKNOWN_CARRIER` (422), `INTERNAL` (500).
 - Modern-only codes (legacy never returns them): `QUEUE_UNAVAILABLE` (503, events endpoint only) and `INJECTED_FAULT` (500, game days only; modern §5.9). The contract suite accepts `QUEUE_UNAVAILABLE` only when `X-ShipTrack-Stack: modern` and treats `INJECTED_FAULT` as a failure.
-- Every response carries `X-ShipTrack-Stack: legacy|modern` (legacy sets it in nginx, modern in middleware). The contract suite uses it to detect routing fall-through.
+- Every response carries `X-ShipTrack-Stack: legacy|modern` (legacy sets it in nginx, modern in middleware) and `Server-Timing: stack;desc="legacy|modern"`, which the UI reads from its own page load. The contract suite uses the first to detect routing fall-through.
 
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|
@@ -301,7 +301,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 
 **Rules**
 - Calls only `GET /api/v1/track/{tracking_number}`, using a same-origin relative URL. No CORS and no API base-URL configuration.
-- **Stack badge** in the footer shows the `X-ShipTrack-Stack` value from the last API response ("Served by: legacy" or "Served by: modern"). This is how the audience watches traffic shift during Wave 1.
+- **Stack badge** in the footer shows which stack served the page ("Served by: legacy" or "Served by: modern"). It is read from the `Server-Timing: stack;desc=...` header of the document response on the first render, with no request of its own, and is then replaced by the `X-ShipTrack-Stack` value of each API response. This is how the audience watches traffic shift during Wave 1.
 - Error states:
   - 404 → "No shipment found for MF…"
   - 422 or failed validation → validation message
@@ -374,7 +374,7 @@ The app runs as system user `shiptrack` (no login shell).
 - `location /ui/` → `alias /opt/shiptrack/current/web/dist/;` with `try_files $uri $uri/ /ui/index.html;` and `Cache-Control: no-cache`.
 - `gzip on` for `text/css` and `application/javascript`.
 - No security headers (AP-16).
-- **Gotcha:** an `add_header` inside a `location` block **cancels inheritance** of every server-level `add_header`. Repeat `add_header X-ShipTrack-Stack legacy always;` in both UI locations, so keep it in an `include` snippet (`shiptrack-headers.inc`) used in every location that sets a header. Otherwise UI responses silently lose the stack header and the contract suite fails.
+- **Gotcha:** an `add_header` inside a `location` block **cancels inheritance** of every server-level `add_header`. Repeat `add_header X-ShipTrack-Stack legacy always;` (and `Server-Timing`) in both UI locations, so keep them in an `include` snippet (`shiptrack-headers.inc`) used in every location that sets a header. Otherwise UI responses silently lose the stack header and the contract suite fails.
 - **Gotcha:** `alias` combined with `try_files` is easy to get wrong. Test deep links (`/ui/track/MF0000000000`) explicitly.
 
 **cron** `/etc/cron.d/shiptrack-sla`:
