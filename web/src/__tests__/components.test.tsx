@@ -1,9 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StackBadge } from "../components/StackBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { Timeline } from "../components/Timeline";
-import { StackProvider, useStack } from "../stack";
+import { StackProvider, stackFromNavigation, useStack } from "../stack";
 import { trackView } from "./helpers";
 
 describe("StatusBadge", () => {
@@ -66,5 +66,63 @@ describe("StackBadge", () => {
 
   it("requires its provider", () => {
     expect(() => render(<StackBadge />)).toThrow(/StackProvider/);
+  });
+});
+
+describe("the stack of the page", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function navigation(entries: unknown[]): void {
+    vi.spyOn(performance, "getEntriesByType").mockReturnValue(entries as PerformanceEntry[]);
+  }
+
+  it("is read from the Server-Timing header of the document, before any API call", () => {
+    navigation([{ serverTiming: [{ name: "stack", description: "legacy" }] }]);
+    expect(stackFromNavigation()).toBe("legacy");
+    render(
+      <StackProvider>
+        <StackBadge />
+      </StackProvider>,
+    );
+    expect(screen.getByText("Served by: legacy")).toBeInTheDocument();
+  });
+
+  it("ignores other server timings and an empty value", () => {
+    navigation([{ serverTiming: [{ name: "db", description: "modern" }] }]);
+    expect(stackFromNavigation()).toBeNull();
+    navigation([{ serverTiming: [{ name: "stack", description: "" }] }]);
+    expect(stackFromNavigation()).toBeNull();
+  });
+
+  it("is unknown when the browser has no navigation entry", () => {
+    navigation([]);
+    expect(stackFromNavigation()).toBeNull();
+  });
+
+  it("is replaced by the stack of an API response", () => {
+    navigation([{ serverTiming: [{ name: "stack", description: "legacy" }] }]);
+    function Setter() {
+      const { setStack } = useStack();
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            setStack("modern");
+          }}
+        >
+          set
+        </button>
+      );
+    }
+    render(
+      <StackProvider>
+        <Setter />
+        <StackBadge />
+      </StackProvider>,
+    );
+    screen.getByRole("button").click();
+    return screen.findByText("Served by: modern");
   });
 });
