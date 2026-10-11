@@ -1,4 +1,4 @@
-# Local development targets. CI runs the same commands (see .github/workflows/ci.yml).
+# Local development targets. CI runs the same commands (see .github/workflows/ci-checks.yml).
 PY := .venv/bin/python
 BIN := .venv/bin
 

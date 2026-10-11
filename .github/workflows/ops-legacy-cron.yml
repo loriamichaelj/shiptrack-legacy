@@ -1,9 +1,9 @@
-name: legacy-cron
+name: ops-legacy-cron
 
 # Reports on, removes, or restores the SLA scan cron on every legacy host, one at a time (cutover
 # wave 3, ADR-0012). `status` changes nothing.
 #
-# Wave 3 step 1 is `remove-sla` here and `remove-cron` in pod-sync.yml, then `status` to see both
+# Wave 3 step 1 is `remove-sla` here and `remove-cron` in ops-pod-sync.yml, then `status` to see both
 # files gone. Before the contract migration, `restore-sla` puts the SLA cron back as the rollback.
 #
 # Nothing secret passes through this workflow. The output is one line of words per host.

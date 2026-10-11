@@ -1,4 +1,4 @@
-name: evidence
+name: check-evidence
 
 # Runs one read-only evidence check against the private database from a legacy host, because a
 # GitHub-hosted runner cannot reach it (design 7.6, ADR-0004). Each check prints one line of
@@ -9,7 +9,7 @@ name: evidence
 #   sla-duplicates  shipments with more than one SLA alert (AP-09 evidence)
 #   ledger-verify   events a simulator run was told were accepted that are not in the database
 #                   (AP-06 evidence, and the "zero lost events" check of waves 2 and 3). It needs
-#                   the ledger name that simulate.yml printed, kept under simulator/ in the bucket
+#                   the ledger name that ops-simulate-events.yml printed, kept under simulator/ in the bucket
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ on:
           - sla-duplicates
           - ledger-verify
       ledger:
-        description: "For ledger-verify: the ledger file name from simulate.yml, such as sent-20261011T120000Z.jsonl"
+        description: "For ledger-verify: the ledger file name from ops-simulate-events.yml, such as sent-20261011T120000Z.jsonl"
         required: false
         type: string
       platform_ref:

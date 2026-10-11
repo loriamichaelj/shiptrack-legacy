@@ -1,4 +1,4 @@
-name: deploy
+name: deploy-app
 
 # Builds a release, uploads it, migrates the database on one host, deploys to every host one at a
 # time, records the release, and smoke-tests through the ALB (design §7.2). It never runs Terraform.

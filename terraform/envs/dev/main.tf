@@ -246,7 +246,7 @@ resource "aws_ssm_document" "shiptrack" {
 
 # --- Database bootstrap --------------------------------------------------------------------------
 # Runs the platform's db/bootstrap.sql from a host inside the VPC, so no CloudShell is needed
-# (ADR-0011). The workflow db-bootstrap.yml dispatches it. The SQL is fetched at a pinned commit and
+# (ADR-0011). The workflow ops-db-bootstrap.yml dispatches it. The SQL is fetched at a pinned commit and
 # checked against a SHA-256 supplied with each run.
 
 data "aws_db_instance" "platform" {
@@ -303,7 +303,7 @@ resource "aws_ssm_document" "db_bootstrap" {
 
 # --- Proof-of-delivery sync (release v1.1.0) ------------------------------------------------------
 # Moves each host's local POD files to the platform POD bucket and installs or removes the
-# per-minute sync (design section 8, ADR-0002 and ADR-0003). The workflow pod-sync.yml dispatches it, one host at a
+# per-minute sync (design section 8, ADR-0002 and ADR-0003). The workflow ops-pod-sync.yml dispatches it, one host at a
 # time, because each host holds different files.
 
 resource "aws_ssm_document" "pod_sync" {
@@ -347,7 +347,7 @@ resource "aws_ssm_document" "pod_sync" {
 
 # --- Legacy cron control (cutover wave 3) ----------------------------------------------------------
 # Reports on, removes, or restores the SLA scan cron on a host (ADR-0012). The workflow
-# legacy-cron.yml dispatches it, one host at a time. The proof-of-delivery sync's cron is removed
+# ops-legacy-cron.yml dispatches it, one host at a time. The proof-of-delivery sync's cron is removed
 # with ShipTrack-PodSync remove-cron.
 
 resource "aws_ssm_document" "legacy_cron" {
@@ -385,7 +385,7 @@ resource "aws_ssm_document" "legacy_cron" {
 
 # --- Evidence checks ------------------------------------------------------------------------------
 # Read-only queries that need the private database, so they run on a host (ADR-0004). The document
-# runs one allow-listed check and returns a single line of numbers. The workflow evidence.yml
+# runs one allow-listed check and returns a single line of numbers. The workflow check-evidence.yml
 # dispatches it on one host.
 
 resource "aws_ssm_document" "evidence" {

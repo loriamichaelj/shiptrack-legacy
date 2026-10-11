@@ -287,7 +287,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 - The cross-stack contract suite lives in `shiptrack-platform/validation/contract`.
 - **UI:** Vitest + React Testing Library for every page state (loading, found, not found, invalid input, network error) and the tracking-number validator. `tsc --noEmit` and ESLint must be clean.
 - **Packaging:** `tests/packaging/run.sh` builds the tarball and, on a fresh `amazonlinux:2023` container, runs migrate, deploy, rollback, pruning, and checksum-failure cases plus the nginx checks: stack header on every route, UI deep links, asset caching, no security headers (AP-16), and the 10 MiB POD limit.
-- **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack (which needs an account and auth token) is used locally only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1); CI runs the same tests against a moto server, so fork PRs and token-less runs pass. The tests take the AWS endpoint from the environment. Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci.yml`; no workflow step depends on a developer workstation.
+- **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack (which needs an account and auth token) is used locally only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1); CI runs the same tests against a moto server, so fork PRs and token-less runs pass. The tests take the AWS endpoint from the environment. Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci-checks.yml`; no workflow step depends on a developer workstation.
 
 ### 3.6 Web UI (minimal)
 
@@ -333,7 +333,7 @@ Each entry is a requirement here and maps 1:1 to a remediation (`REM-xx`) in the
 | AP-10 | Oversized fixed capacity | 2 × `m5.xlarge`, ASG min = max = desired = 2, no scaling policies | CPU < 10% at baseline load; Compute Optimizer recommendation | REM-10 |
 | AP-11 | gp2 root volumes, oversized | 100 GiB gp2, encrypted | Cost Explorer EBS line; Compute Optimizer | REM-11 |
 | AP-12 | In-place mutable deploys, no draining | Symlink swap + `systemctl restart` without deregistering from the TG | ALB `HTTPCode_ELB_502_Count` spike during deploy | REM-12 |
-| AP-13 | No security scanning in CI | `ci.yml` runs lint/test/build only; scans run once out-of-band (§9) | Assessment scan reports | REM-13 |
+| AP-13 | No security scanning in CI | `ci-checks.yml` runs lint/test/build only; scans run once out-of-band (§9) | Assessment scan reports | REM-13 |
 | AP-14 | AMI drift / manual patching | AMI ID resolved once and pinned in tfvars; no instance refresh | Inspector EC2 CVE findings over time | REM-14 |
 | AP-15 | No application metrics | Observability is limited to ALB metrics + CloudWatch agent host metrics | No latency per route, no event-lag signal | REM-15 |
 | AP-16 | No security headers on the UI | nginx serves `/ui/` with no `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, or frame protection | `curl -sI $BASE_URL/ui/` | REM-16 |
@@ -450,7 +450,7 @@ Default tags are the same keys as platform, with `Stack=legacy` and `Repo=shiptr
   5. Write a `RELEASE` file (sha, UTC build time, builder).
 - Output: `shiptrack-<sha>.tar.gz` (created with `tar -C /opt/shiptrack/releases -czf … <sha>`) plus `shiptrack-<sha>.tar.gz.sha256`.
 
-### 7.2 Deploy — `.github/workflows/deploy.yml`
+### 7.2 Deploy — `.github/workflows/deploy-app.yml`
 Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional `sha` (used by the AP-06 and AP-12 evidence runs), with `environment: dev` (required reviewers) and the `<PREFIX>-legacy-deploy` role via OIDC. The first deploy requires `db/bootstrap.sql` (platform §6.4) to have been run.
 
 1. Build the tarball, then upload the tarball and checksum to `s3://<artifacts>/releases/`.
@@ -473,23 +473,23 @@ Triggered on push to `dev` after CI, or by `workflow_dispatch` with an optional 
 - It **does not roll back the database** (documented in `docs/runbooks/rollback.md`).
 - Exposed as `workflow_dispatch` with an optional target sha.
 
-### 7.4 CI — `.github/workflows/ci.yml` (pull_request)
+### 7.4 CI — `.github/workflows/ci-checks.yml` (pull_request)
 Steps: ruff, mypy, pytest (Postgres 17 service), UI (`npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` + bundle-size check), `build_tarball.sh` (no upload), `terraform fmt -check` and `validate`. **No Trivy, Checkov, or secret scanning** (AP-13). Actions are pinned to SHAs; `permissions` are minimal.
 
-### 7.5 Terraform — `.github/workflows/terraform-pr.yml`, `terraform-apply.yml`
-- **`terraform-pr.yml`** (pull_request, paths `terraform/**`): `<PREFIX>-legacy-plan` role via OIDC; `terraform fmt -check`, `init`, `validate`, then `plan -out` (never uploaded as an artifact) with an address-and-action-only summary posted as a PR comment (platform §6.12). **No Checkov or Trivy** (AP-13; the scans run out-of-band, §9). The plan role writes `.tflock` objects (platform §6.1).
-- **`terraform-apply.yml`** (push to `dev`, paths `terraform/**`): `environment: dev` (required reviewers), `<PREFIX>-legacy-apply` role; a fresh `plan -out`, then `apply` of that plan in the same job. `concurrency: { group: tf-legacy-dev, cancel-in-progress: false }`.
-- Infrastructure and application releases are separate pipelines: `deploy.yml` never runs Terraform, and Terraform never touches `current_release` (`ignore_changes`, §6). A new `ami_id` or other tfvars change goes through a PR like any other infrastructure change.
+### 7.5 Terraform — `.github/workflows/ci-terraform.yml`, `apply-terraform.yml`
+- **`ci-terraform.yml`** (pull_request, paths `terraform/**`): `<PREFIX>-legacy-plan` role via OIDC; `terraform fmt -check`, `init`, `validate`, then `plan -out` (never uploaded as an artifact) with an address-and-action-only summary posted as a PR comment (platform §6.12). **No Checkov or Trivy** (AP-13; the scans run out-of-band, §9). The plan role writes `.tflock` objects (platform §6.1).
+- **`apply-terraform.yml`** (push to `dev`, paths `terraform/**`): `environment: dev` (required reviewers), `<PREFIX>-legacy-apply` role; a fresh `plan -out`, then `apply` of that plan in the same job. `concurrency: { group: tf-legacy-dev, cancel-in-progress: false }`.
+- Infrastructure and application releases are separate pipelines: `deploy-app.yml` never runs Terraform, and Terraform never touches `current_release` (`ignore_changes`, §6). A new `ami_id` or other tfvars change goes through a PR like any other infrastructure change.
 
-### 7.6 Evidence and assessment — `.github/workflows/evidence.yml`, `assess.yml`
+### 7.6 Evidence and assessment — `.github/workflows/check-evidence.yml`, `assess.yml`
 
 GitHub-hosted runners can reach the ALB and AWS APIs but not the private RDS instance, and no AWS credentials exist on workstations, so the assessment runs in workflows.
 
-- **`evidence.yml`** (`workflow_dispatch`, `environment: dev`, `<PREFIX>-legacy-deploy` role): dispatches the SSM document `ShipTrack-Evidence` to one legacy host. The document runs an allow-listed script from `scripts/evidence/` using the release venv's psycopg (no `psql` client is installed) with the `app.ini` credentials, and returns the output. It also runs `simulator verify`: the workflow first uploads the ledger and the simulator package to the artifact bucket, and the host runs `verify` against the database.
+- **`check-evidence.yml`** (`workflow_dispatch`, `environment: dev`, `<PREFIX>-legacy-deploy` role): dispatches the SSM document `ShipTrack-Evidence` to one legacy host. The document runs an allow-listed script from `scripts/evidence/` using the release venv's psycopg (no `psql` client is installed) with the `app.ini` credentials, and returns the output. It also runs `simulator verify`: the workflow first uploads the ledger and the simulator package to the artifact bucket, and the host runs `verify` against the database.
   - Raw SSM output is never printed to the workflow log. Each script's output passes through the scrub step before it is echoed or stored (platform §6.12). The allow-listed scripts include the G-POD gate query (below).
 - **`assess.yml`** (`workflow_dispatch`): orchestrates §9 end to end.
   - k6 `baseline` with `TARGET=legacy` (platform repo checked out at a pinned SHA).
-  - The AP-05/06/09/12/16 evidence runs. AP-06 triggers `deploy.yml` through `workflow_dispatch` while the simulator runs.
+  - The AP-05/06/09/12/16 evidence runs. AP-06 triggers `deploy-app.yml` through `workflow_dispatch` while the simulator runs.
   - CloudWatch and Cost Explorer reads with the `<PREFIX>-legacy-plan` role.
   - The out-of-band scans: Trivy, Checkov, pip-audit, gitleaks.
   - It writes the §9 files, runs a scrub step (account IDs, ARNs, DNS names, host and instance IDs → placeholders), and opens a PR for review. Nothing is committed to `dev` directly.
@@ -567,8 +567,8 @@ Cross-repo build order is in platform §13. L1, L1b, and the build parts of L2 c
 | **L1b Web UI** | `web/` per §3.6, Vitest tests | `npm run build` produces `web/dist`; tests green; bundle < 200 KB gzipped |
 | **L2 Packaging** | `deploy/` configs (systemd, nginx, cron, logrotate, CloudWatch agent), `scripts/build_tarball.sh`, `deploy.sh`, `rollback.sh`, `migrate.sh`, `lib.sh`, `tests/packaging/` | Tarball builds in an `amazonlinux:2023` container; `shellcheck` passes; `tests/packaging/run.sh` passes |
 | **L3 Terraform** | `modules/app_host`, `envs/dev`, SSM docs, artifact bucket | `validate` passes; the AP settings visible in the plan |
-| **L4 CI/CD** | `ci.yml`, `deploy.yml`, `rollback.yml`, `terraform-pr.yml`, `terraform-apply.yml` (§7.5) | `actionlint` passes; OIDC role ARNs from repo secrets; the plan role produces a clean plan |
-| **L5 Assessment tooling** | `assess.yml` and `evidence.yml` (§7.6), the `ShipTrack-Evidence` SSM document, `scripts/evidence/*`, `docs/assessment/` templates | `actionlint` passes; templates contain every AP and placeholders for numbers; the scrub step is tested on sample data |
+| **L4 CI/CD** | `ci-checks.yml`, `deploy-app.yml`, `ops-rollback-release.yml`, `ci-terraform.yml`, `apply-terraform.yml` (§7.5) | `actionlint` passes; OIDC role ARNs from repo secrets; the plan role produces a clean plan |
+| **L5 Assessment tooling** | `assess.yml` and `check-evidence.yml` (§7.6), the `ShipTrack-Evidence` SSM document, `scripts/evidence/*`, `docs/assessment/` templates | `actionlint` passes; templates contain every AP and placeholders for numbers; the scrub step is tested on sample data |
 | **L6 v1.1.0** *(on request)* | §8 | Migration script is idempotent; GET serves both `file://` and `s3://` |
 
 ---

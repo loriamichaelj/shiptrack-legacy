@@ -22,14 +22,14 @@ clean, typed, and tested.
 | L2 Packaging | Done: `deploy/`, `scripts/`, `tests/packaging/` |
 | L3 Terraform | Done and applied: `terraform/envs/dev`, `terraform/modules/app_host` |
 | L4 CI/CD | Done and in use (workflows below) |
-| L5 Assessment tooling | Partly: `evidence.yml` and the `ShipTrack-Evidence` document (the G-POD gate, AP-09 duplicates, and the ledger check) are built (ADR-0004). Not started: `assess.yml`, the assessment reports, and the anti-pattern evidence procedures |
-| L6 v1.1.0 | Done: deployed and tagged `v1.1.0`. The S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
+| L5 Assessment tooling | Partly: `check-evidence.yml` and the `ShipTrack-Evidence` document (the G-POD gate, AP-09 duplicates, and the ledger check) are built (ADR-0004). Not started: `assess.yml`, the assessment reports, and the anti-pattern evidence procedures |
+| L6 v1.1.0 | Done: deployed and tagged `v1.1.0`. The S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `ops-pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
 
 Modern serves all traffic. Legacy is kept running as a fallback and nothing is destroyed: its UI
 is on the platform's preview port, for the addresses that port allows (platform ADR-0032). Its SLA
-and sync cron jobs are removed (`legacy-cron.yml`, `pod-sync.yml`), so it does not scan or sync.
+and sync cron jobs are removed (`ops-legacy-cron.yml`, `ops-pod-sync.yml`), so it does not scan or sync.
 To fall back to it, suspend modern's SLA CronJob before restoring legacy's cron.
-`simulate.yml` has seeded the stack with shipments, events, and proof-of-delivery files.
+`ops-simulate-events.yml` has seeded the stack with shipments, events, and proof-of-delivery files.
 
 ## Layout
 
@@ -50,20 +50,33 @@ and the `dev` environment requires a reviewer.
 
 | Workflow | Runs | Does |
 |---|---|---|
-| `ci.yml` | pull requests | Lint, types, tests with a 75% coverage gate, Terraform format and validate, UI checks, and a packaging test |
-| `terraform-pr.yml` | pull requests touching Terraform | Format, validate, and a plan comment with addresses and actions only |
-| `terraform-apply.yml` | push to `dev`, or by hand | Plans and applies `terraform/envs/dev` after approval |
-| `db-bootstrap.yml` | by hand | Creates the database, roles, and schema from a legacy host (ADR-0011) |
-| `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
-| `rollback.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
-| `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack; `target` is `legacy` (pinned), `modern` (pinned), or `none` (the ALB's weights, which covers both stacks during a cutover) |
-| `legacy-cron.yml` | by hand | Cutover wave 3: reports on, removes (`remove-sla`), or restores the SLA scan cron on each legacy host, one at a time. One line of words per host |
-| `evidence.yml` | by hand | Runs one read-only check on a host against the private database: `pod-gate` (cutover gate G-POD), `sla-duplicates`, or `ledger-verify`. Shows one line of numbers |
-| `pod-sync.yml` | by hand | v1.1.0: moves each host's proof-of-delivery files to S3 (`dry-run`, `migrate`), and installs or removes the per-minute sync (`install-cron`, `remove-cron`). One host at a time |
-| `resolve-ami.yml` | by hand | Prints the current Amazon Linux 2023 AMI to pin in `terraform.tfvars` (AP-14) |
+| `ci-checks.yml` | pull requests | Lint, types, tests with a 75% coverage gate, Terraform format and validate, UI checks, and a packaging test |
+| `ci-terraform.yml` | pull requests touching Terraform | Format, validate, and a plan comment with addresses and actions only |
+| `apply-terraform.yml` | push to `dev`, or by hand | Plans and applies `terraform/envs/dev` after approval |
+| `ops-db-bootstrap.yml` | by hand | Creates the database, roles, and schema from a legacy host (ADR-0011) |
+| `deploy-app.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
+| `ops-rollback-release.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
+| `ops-simulate-events.yml` | by hand | Runs the platform's carrier event simulator against the live stack; `target` is `legacy` (pinned), `modern` (pinned), or `none` (the ALB's weights, which covers both stacks during a cutover) |
+| `ops-legacy-cron.yml` | by hand | Cutover wave 3: reports on, removes (`remove-sla`), or restores the SLA scan cron on each legacy host, one at a time. One line of words per host |
+| `check-evidence.yml` | by hand | Runs one read-only check on a host against the private database: `pod-gate` (cutover gate G-POD), `sla-duplicates`, or `ledger-verify`. Shows one line of numbers |
+| `ops-pod-sync.yml` | by hand | v1.1.0: moves each host's proof-of-delivery files to S3 (`dry-run`, `migrate`), and installs or removes the per-minute sync (`install-cron`, `remove-cron`). One host at a time |
 
-First run, in order: `terraform-apply`, then `db-bootstrap`, then `deploy`. The URL is the platform
+First run, in order: `apply-terraform`, then `ops-db-bootstrap`, then `deploy-app`. The URL is the platform
 ALB's, from the `base_url` SSM parameter; it is not written in this repository.
+
+### Workflow names
+
+A workflow file is `<category>-<what>.yml`, and its `name:` is the file name without `.yml`, so the
+Actions list sorts by what a workflow does.
+
+| Prefix | Does | Runs on | Needs approval |
+|---|---|---|---|
+| `ci-` | Checks a pull request. Changes nothing in AWS | pull request | No |
+| `apply-` | Applies Terraform | push to `dev`, or by hand | `dev` environment |
+| `release-` | Builds an artifact and pushes it | push to `dev`, or by hand | No |
+| `deploy-` | Puts a release on the running stack | after a release, or by hand | `dev` environment |
+| `ops-` | One operation on a running system: rollback, unlock, cron, database | by hand | `dev` environment |
+| `check-` | Reads state or judges evidence. Changes nothing | by hand, or a schedule | No, except `check-evidence`, which runs on a host (`dev` environment) |
 
 ## Local development
 
