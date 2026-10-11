@@ -1,4 +1,12 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { probeStack } from "./stackProbe";
 
 interface StackContextValue {
   /** The stack that served this page, then the X-ShipTrack-Stack of the latest API response. */
@@ -8,24 +16,27 @@ interface StackContextValue {
 
 const StackContext = createContext<StackContextValue | null>(null);
 
-/**
- * The stack that served this page, read from the Server-Timing header of the document response
- * (`stack;desc="modern"`). The browser exposes it on the navigation entry, so it is known at the
- * first render, before any API call. Null when the header is absent or unreadable.
- */
-export function stackFromNavigation(): string | null {
-  if (typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") {
-    return null;
-  }
-  const entry = performance.getEntriesByType("navigation")[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  const timing = entry?.serverTiming?.find((item) => item.name === "stack");
-  return timing !== undefined && timing.description !== "" ? timing.description : null;
+interface StackProviderProps {
+  children: ReactNode;
+  /** How the page asks which stack served it; a test passes its own. */
+  probe?: (signal: AbortSignal) => Promise<string | null>;
 }
 
-export function StackProvider({ children }: { children: ReactNode }) {
-  const [stack, setStack] = useState<string | null>(stackFromNavigation);
+export function StackProvider({ children, probe = probeStack }: StackProviderProps) {
+  const [stack, setStack] = useState<string | null>(null);
+
+  // Ask once on load, so the badge does not wait for the first track request. An API response that
+  // got there first is not overwritten.
+  useEffect(() => {
+    const controller = new AbortController();
+    void probe(controller.signal).then((found) => {
+      if (found !== null && found !== "") setStack((current) => current ?? found);
+    });
+    return () => {
+      controller.abort();
+    };
+  }, [probe]);
+
   const value = useMemo(() => ({ stack, setStack }), [stack]);
   return <StackContext.Provider value={value}>{children}</StackContext.Provider>;
 }

@@ -2,5 +2,3 @@
 # location cancels inheritance of all server-level add_header directives, so this line must be
 # repeated wherever add_header appears or responses silently lose the stack header.
 add_header X-ShipTrack-Stack legacy always;
-# The UI reads the stack from the document's navigation entry, so its badge is right on first paint.
-add_header Server-Timing 'stack;desc="legacy"' always;
