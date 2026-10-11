@@ -25,8 +25,11 @@ clean, typed, and tested.
 | L5 Assessment tooling | Partly: `evidence.yml` and the `ShipTrack-Evidence` document (the G-POD gate, AP-09 duplicates, and the ledger check) are built (ADR-0004). Not started: `assess.yml`, the assessment reports, and the anti-pattern evidence procedures |
 | L6 v1.1.0 | Done: deployed and tagged `v1.1.0`. The S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
 
-The stack is deployed and serving through the platform ALB. `simulate.yml` has seeded it with
-shipments, events, and proof-of-delivery files.
+Modern serves all traffic. Legacy is kept running as a fallback and nothing is destroyed: its UI
+is on the platform's preview port, for the addresses that port allows (platform ADR-0032). Its SLA
+and sync cron jobs are removed (`legacy-cron.yml`, `pod-sync.yml`), so it does not scan or sync.
+To fall back to it, suspend modern's SLA CronJob before restoring legacy's cron.
+`simulate.yml` has seeded the stack with shipments, events, and proof-of-delivery files.
 
 ## Layout
 
