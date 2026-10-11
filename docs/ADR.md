@@ -7,7 +7,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0001 | `kms-decrypt-for-cmk-secret` | Accepted |
 | 0002 | `podsync-interval-and-window` | Accepted |
 | 0003 | `v1.1-kms-on-pod-bucket` | Accepted |
-| 0004 | `evidence-via-ssm-and-workflows` | Planned |
+| 0004 | `evidence-via-ssm-and-workflows` | Accepted |
 | 0005 | `aws-emulator-in-ci` | Accepted |
 | 0006 | `ui-toolchain-versions` | Accepted |
 | 0007 | `nginx-body-limit` | Accepted |
@@ -54,15 +54,15 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0004: evidence-via-ssm-and-workflows
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** Why assessment evidence runs through SSM documents and workflows (private RDS, no local AWS credentials, public-repo scrub).
 
-**Context:** _to be written when decided_
+**Context:** The evidence this stack has to produce reads the database: how many proof-of-delivery documents are still local, how many shipments have duplicate SLA alerts, and which events a simulator run was told were accepted but are not stored. The database is private, so a GitHub-hosted runner cannot reach it, there are no AWS credentials on a workstation, and the repository is public, so a log or an artifact must never carry a row, a key, an address, or an identifier.
 
-**Decision:** _to be written when decided_
+**Decision:** `ShipTrack-Evidence` is an SSM document that runs one of three named checks on one host, with the release's virtualenv and the credentials already on the host (`scripts/evidence.sh`, `shiptrack.jobs.evidence`). The check is an allowed value, not a string that reaches a shell, and the ledger and simulator keys are limited to their prefixes. Each check prints one line of numbers and nothing else, and `evidence.yml` shows only lines that match those formats. `pod-gate` exits non-zero when its count is not zero, so cutover gate G-POD is a failing run. `ledger-verify` takes a ledger that `simulate.yml` kept in the artifact bucket and a simulator wheel the workflow builds from the platform at a pinned commit, unpacks it without installing it, and runs the simulator's own `verify`.
 
-**Consequences:** _to be written when decided_
+**Consequences:** Evidence needs a host in service, and it runs as the application user, so it can read whatever that user can. The three checks are the whole allow-list, so a new one is a code change reviewed in a pull request. The remaining assessment tooling (`assess.yml`, the k6 baseline against legacy, the cost and scan reports, the anti-pattern evidence procedures) is still to build.
 
 ## ADR-0005: aws-emulator-in-ci
 

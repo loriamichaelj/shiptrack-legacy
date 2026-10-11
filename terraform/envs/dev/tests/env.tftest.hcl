@@ -235,3 +235,31 @@ run "the_pod_sync_document_is_a_small_closed_set_of_actions" {
     error_message = "The document embeds scripts/pod_sync.sh."
   }
 }
+
+run "the_evidence_document_runs_only_allow_listed_read_only_checks" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_ssm_document.evidence.name == "ShipTrack-Evidence",
+      toset(jsondecode(aws_ssm_document.evidence.content).parameters.check.allowedValues) == toset(["pod-gate", "sla-duplicates", "ledger-verify"]),
+      jsondecode(aws_ssm_document.evidence.content).parameters.ledgerKey.default == "none",
+      jsondecode(aws_ssm_document.evidence.content).parameters.wheelKey.default == "none",
+    ])
+    error_message = "ShipTrack-Evidence takes one of three named checks, and the keys default to none."
+  }
+
+  assert {
+    condition = alltrue([
+      can(regex("^\\^\\(none\\|simulator/", jsondecode(aws_ssm_document.evidence.content).parameters.ledgerKey.allowedPattern)),
+      can(regex("^\\^\\(none\\|evidence/", jsondecode(aws_ssm_document.evidence.content).parameters.wheelKey.allowedPattern)),
+    ])
+    error_message = "The ledger and the simulator keys are limited to their prefixes."
+  }
+
+  assert {
+    condition     = can(regex("shiptrack.jobs.evidence", jsondecode(aws_ssm_document.evidence.content).mainSteps[0].inputs.runCommand[0]))
+    error_message = "The document embeds scripts/evidence.sh."
+  }
+}
+
