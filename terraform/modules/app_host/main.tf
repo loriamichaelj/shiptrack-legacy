@@ -98,6 +98,21 @@ data "aws_iam_policy_document" "instance" {
     }
   }
 
+  # Release v1.1.0 (ADR-0003), not part of the anti-pattern: s3:* above does not cover KMS, and the
+  # proof-of-delivery bucket is encrypted with the data key, so reading and writing its objects
+  # needs it. Only through S3. This is the one IAM change v1.1.0 makes.
+  statement {
+    sid       = "UseTheDataKeyThroughS3"
+    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+    resources = [var.data_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${local.region}.amazonaws.com"]
+    }
+  }
+
   # Not part of the anti-pattern: user-data reads the platform contract and the current release.
   statement {
     sid       = "ReadTheContractAndTheCurrentRelease"

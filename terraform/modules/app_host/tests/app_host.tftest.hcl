@@ -31,6 +31,7 @@ variables {
   permission_boundary_arn = "arn:aws:iam::123456789012:policy/testowner-dev-shiptrack-workload-boundary"
   secrets_key_arn         = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000b"
   logs_key_arn            = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000c"
+  data_key_arn            = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000a"
   sns_sev2_arn            = "arn:aws:sns:us-east-1:123456789012:shiptrack-alerts-sev2"
   artifact_bucket         = "shiptrack-legacy-artifacts-mock"
   ami_id                  = "ami-0123456789abcdef0"
@@ -128,6 +129,18 @@ run "the_instance_role_is_over_privileged_and_bounded" {
       && s.Condition.StringEquals["kms:ViaService"] == "secretsmanager.us-east-1.amazonaws.com"
     ])
     error_message = "The host may decrypt the secrets key only through Secrets Manager."
+  }
+
+  # Release v1.1.0: the data key, only through S3, for the proof-of-delivery bucket.
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.instance.policy).Statement :
+      s.Sid == "UseTheDataKeyThroughS3"
+      && toset(s.Action) == toset(["kms:GenerateDataKey", "kms:Decrypt"])
+      && s.Resource == var.data_key_arn
+      && s.Condition.StringEquals["kms:ViaService"] == "s3.us-east-1.amazonaws.com"
+    ])
+    error_message = "The host may use the data key only through S3 (release v1.1.0)."
   }
 
   assert {

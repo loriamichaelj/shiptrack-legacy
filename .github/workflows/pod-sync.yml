@@ -1,0 +1,68 @@
+name: pod-sync
+
+# Moves each legacy host's proof-of-delivery files to the platform POD bucket, and installs or
+# removes the per-minute sync (release v1.1.0, design section 8, ADR-0002). Each host holds different
+# files, so the document runs on every host, one at a time.
+#
+# Before cutover wave 2, in order: `dry-run`, then `migrate`, then `install-cron`. The sync stays
+# installed through waves 2 and 3 and is removed with `remove-cron` when legacy is decommissioned.
+# The hosts must be running release v1.1.0: the document refuses otherwise.
+#
+# Nothing secret passes through this workflow. The output of a run is a count line per host, with
+# no file names or identifiers, which is the only part shown.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do on every legacy host"
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - migrate
+          - install-cron
+          - remove-cron
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Run the sync on every host, one at a time
+        env:
+          DOCUMENT: ShipTrack-PodSync
+          ACTION: ${{ inputs.action }}
+          OUTPUT_FILE: ${{ runner.temp }}/pod-sync-output.txt
+          MAX_CONCURRENCY: "1"
+          TIMEOUT_SECONDS: "900"
+        run: |
+          bucket=$(aws ssm get-parameter --name /shiptrack/platform/pod_bucket_name --query Parameter.Value --output text)
+          echo "::add-mask::$bucket"
+          export PARAMETERS="{\"action\":[\"$ACTION\"],\"podBucket\":[\"$bucket\"]}"
+          .github/scripts/ssm-run.sh
+          # One line per host with four counts, or the cron actions' own log line; safe to show.
+          grep -E '^pod sync ' "$OUTPUT_FILE" || true

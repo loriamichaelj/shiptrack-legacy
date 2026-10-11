@@ -16,6 +16,8 @@ data "aws_ssm_parameter" "platform" {
     "permission_boundary_arn",
     "kms_secrets_key_arn",
     "kms_logs_key_arn",
+    "kms_data_key_arn",
+    "pod_bucket_name",
     "sns_sev2_arn",
     "rds_endpoint",
   ])
@@ -145,6 +147,7 @@ module "app_host" {
   permission_boundary_arn = local.platform.permission_boundary_arn
   secrets_key_arn         = local.platform.kms_secrets_key_arn
   logs_key_arn            = local.platform.kms_logs_key_arn
+  data_key_arn            = local.platform.kms_data_key_arn
   sns_sev2_arn            = local.platform.sns_sev2_arn
   artifact_bucket         = aws_s3_bucket.artifacts.id
   ami_id                  = var.ami_id
@@ -292,6 +295,50 @@ resource "aws_ssm_document" "db_bootstrap" {
           "SHIPTRACK_EOF_SCRIPT",
           "bash /tmp/shiptrack-db-bootstrap.sh '{{ platformRepo }}' '{{ platformSha }}' '{{ sqlSha256 }}' '{{ masterSecretArn }}'",
           "rm -f /tmp/shiptrack-db-bootstrap.sh",
+        ])]
+      }
+    }]
+  })
+}
+
+# --- Proof-of-delivery sync (release v1.1.0) ------------------------------------------------------
+# Moves each host's local POD files to the platform POD bucket and installs or removes the
+# per-minute sync (design section 8, ADR-0002 and ADR-0003). The workflow pod-sync.yml dispatches it, one host at a
+# time, because each host holds different files.
+
+resource "aws_ssm_document" "pod_sync" {
+  name            = "ShipTrack-PodSync"
+  document_type   = "Command"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Move this host's proof-of-delivery files to S3, or install or remove the per-minute sync"
+    parameters = {
+      action = {
+        type          = "String"
+        description   = "What to do"
+        allowedValues = ["dry-run", "migrate", "install-cron", "remove-cron"]
+      }
+      podBucket = {
+        type           = "String"
+        description    = "The proof-of-delivery bucket"
+        allowedPattern = "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+        default        = local.platform.pod_bucket_name
+      }
+    }
+    mainSteps = [{
+      action = "aws:runShellScript"
+      name   = "run"
+      inputs = {
+        runCommand = [join("\n", [
+          "set -euo pipefail",
+          "cat >/tmp/shiptrack-pod-sync.sh <<'SHIPTRACK_EOF_SCRIPT'",
+          file("${local.scripts}/lib.sh"),
+          file("${local.scripts}/pod_sync.sh"),
+          "SHIPTRACK_EOF_SCRIPT",
+          "bash /tmp/shiptrack-pod-sync.sh '{{ action }}' '{{ podBucket }}'",
+          "rm -f /tmp/shiptrack-pod-sync.sh",
         ])]
       }
     }]

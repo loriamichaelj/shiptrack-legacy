@@ -5,8 +5,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | # | Title | Status |
 |---|---|---|
 | 0001 | `kms-decrypt-for-cmk-secret` | Accepted |
-| 0002 | `podsync-interval-and-window` | Planned |
-| 0003 | `v1.1-kms-on-pod-bucket` | Planned |
+| 0002 | `podsync-interval-and-window` | Accepted |
+| 0003 | `v1.1-kms-on-pod-bucket` | Accepted |
 | 0004 | `evidence-via-ssm-and-workflows` | Planned |
 | 0005 | `aws-emulator-in-ci` | Accepted |
 | 0006 | `ui-toolchain-versions` | Accepted |
@@ -30,27 +30,27 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0002: podsync-interval-and-window
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** PodSync every minute under flock; the resulting 1–2 minute window in which a legacy-uploaded POD is unreadable through modern; why a longer interval was rejected (design §8).
 
-**Context:** _to be written when decided_
+**Context:** Legacy keeps each proof-of-delivery file on the host that received it (AP-05), and modern reads it from S3. During waves 2 and 3 both stacks take uploads and reads against one `pod_documents` table, so a POD uploaded to legacy is invisible to modern until it is in S3. New legacy uploads still go to local disk, because changing the upload path would be a fix to an anti-pattern that this stack must keep.
 
-**Decision:** _to be written when decided_
+**Decision:** `ShipTrack-PodSync` installs `/etc/cron.d/shiptrack-podsync`, which runs `scripts/migrate_pod_to_s3.py` every minute as the application user under `flock -n`, so a run that is still going is never doubled. `pod-sync.yml` dispatches it on each host one at a time, with `dry-run` and `migrate` actions for the first pass and `remove-cron` for decommissioning. The window is one interval plus the run time, so about one to two minutes. A longer interval was rejected because the gate G-POD counts `file://` rows older than 5 minutes: at five minutes the window would consume the whole gate and the count could not reach zero.
 
-**Consequences:** _to be written when decided_
+**Consequences:** A POD uploaded to legacy returns 404 through modern for up to about two minutes. Reads that stay on legacy are unaffected, because legacy reads either scheme. The window closes when wave 2 reaches 100%. One job runs per host per minute against the database, which is small next to the connection budget (modern ADR-0002).
 
 ## ADR-0003: v1.1-kms-on-pod-bucket
 
-**Status:** Planned
+**Status:** Accepted
 
 **Records:** Even s3:* is not enough for the SSE-KMS POD bucket; the KMS grant is the only IAM change in v1.1.
 
-**Context:** _to be written when decided_
+**Context:** AP-03 gives the instance role `s3:*` on every resource, and the design expected that to be enough for release v1.1.0 to read and write the POD bucket. It is not: the bucket is encrypted with the platform data key, and S3 needs the caller to be allowed `kms:GenerateDataKey` to write and `kms:Decrypt` to read an object under that key. `s3:*` does not cover KMS.
 
-**Decision:** _to be written when decided_
+**Decision:** The instance role gets one new statement, `UseTheDataKeyThroughS3`: `kms:GenerateDataKey` and `kms:Decrypt` on the data key only, with `kms:ViaService = s3.<region>.amazonaws.com`. The key ARN comes from the platform contract (`kms_data_key_arn`) and the bucket name from `pod_bucket_name`. It is written beside the secrets-key statement, which is also outside AP-03, and AP-03's two statements are untouched.
 
-**Consequences:** _to be written when decided_
+**Consequences:** The host can use the data key only through S3, not to decrypt arbitrary data directly. The assessment can say that even `s3:*` was not enough, which is a small illustration of why AP-03 is not a safe shortcut. It is applied by the legacy `terraform-apply` workflow and changes the instance profile policy only: no instance is replaced.
 
 ## ADR-0004: evidence-via-ssm-and-workflows
 
