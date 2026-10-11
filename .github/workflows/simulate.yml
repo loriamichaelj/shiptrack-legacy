@@ -1,6 +1,6 @@
 name: simulate
 
-# Runs the platform's carrier event simulator against the live legacy stack: it creates shipments
+# Runs the platform's carrier event simulator against the live stack (legacy by default): it creates shipments
 # and sends their lifecycles, with duplicate, out-of-order, and exception events, and records every
 # accepted event in a ledger. The ledger goes to the private artifact bucket, where a later `verify`
 # can compare it with the database (this is how AP-06, lost events, is proven). A run writes real data.
@@ -27,6 +27,15 @@ on:
         required: true
         default: "1"
         type: string
+      target:
+        description: "Which stack the events go to: legacy (pinned), modern (pinned), or none (the ALB's weights, so the run covers both stacks during a cutover)"
+        required: true
+        default: legacy
+        type: choice
+        options:
+          - legacy
+          - modern
+          - none
       platform_ref:
         description: "Branch, tag, or commit of shiptrack-platform to take the simulator from"
         required: false
@@ -119,7 +128,7 @@ jobs:
       - name: Run the simulator
         working-directory: platform/validation/simulator
         env:
-          TARGET: legacy
+          TARGET: ${{ inputs.target }}
           SHIPMENTS: ${{ inputs.shipments }}
           CONCURRENCY: ${{ inputs.concurrency }}
           SEED: ${{ inputs.seed }}
