@@ -85,6 +85,19 @@ def test_sla_duplicates_counts_shipments_and_extra_alerts(
 def test_no_alerts_is_zero_and_zero(client: TestClient, engine: Engine) -> None:
     with Session(engine) as session:
         assert evidence.sla_duplicates(session) == (0, 0)
+        assert evidence.sla_alert_total(session) == 0
+
+
+def test_the_alert_total_counts_every_alert(
+    client: TestClient, make_shipment: MakeShipment, engine: Engine
+) -> None:
+    twice, once = (make_shipment()["id"] for _ in range(2))
+    for sid, times in ((twice, 2), (once, 1)):
+        for _ in range(times):
+            add_alert(engine, sid)
+
+    with Session(engine) as session:
+        assert evidence.sla_alert_total(session) == 3
 
 
 @pytest.fixture()
@@ -143,7 +156,7 @@ def test_cli_sla_duplicates_is_evidence_not_a_gate(
     add_alert(engine, sid)
 
     assert evidence.main(["sla-duplicates"]) == 0
-    assert capsys.readouterr().out == "SLA_DUPLICATES shipments=1 extra_alerts=1\n"
+    assert capsys.readouterr().out == "SLA_DUPLICATES shipments=1 extra_alerts=1 alerts=2\n"
 
 
 def simulator_stub(root: Path, *, accepted: int, persisted: int, missing: int) -> Path:

@@ -156,5 +156,5 @@ jobs:
         env:
           OUTPUT_FILE: ${{ runner.temp }}/evidence-output.txt
         run: |
-          grep -E '^(POD_GATE file_uris_older_than_5_minutes=[0-9]+|SLA_DUPLICATES shipments=[0-9]+ extra_alerts=[0-9]+|LEDGER_VERIFY accepted=[0-9]+ persisted=[0-9]+ missing=[0-9]+)$' \
+          grep -E '^(POD_GATE file_uris_older_than_5_minutes=[0-9]+|SLA_DUPLICATES shipments=[0-9]+ extra_alerts=[0-9]+ alerts=[0-9]+|LEDGER_VERIFY accepted=[0-9]+ persisted=[0-9]+ missing=[0-9]+)$' \
             "$OUTPUT_FILE" | tee -a "$GITHUB_STEP_SUMMARY" || echo "no result line was produced"
