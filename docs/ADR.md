@@ -15,6 +15,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0009 | `l3-terraform-decisions` | Accepted |
 | 0010 | `l4-workflow-decisions` | Accepted |
 | 0011 | `database-bootstrap-from-a-host` | Accepted |
+| 0012 | `sla-cron-control-via-ssm` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -149,3 +150,12 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 **Consequences:** The master credentials are used from a legacy host, which any anti-pattern in the host's role (AP-03) already allows; this stays a legacy-only convenience and the modern stack does not use it. The platform runbook remains the documented route where CloudShell is available. The `GRANT` of the migrator role to the master user, which `bootstrap.sql` relies on, is exercised for the first time on RDS by this run (platform ADR-0015, VERIFY); its failure would show as a `permission denied` and a failed run.
 
+## ADR-0012: sla-cron-control-via-ssm
+
+**Status:** Accepted
+
+**Context:** Cutover wave 3 starts by removing the SLA scan cron from the legacy hosts so that the modern CronJob is the only scanner (modern design §9.2). The cron file is written at launch by the launch template, not by a release, so no deploy can remove it, and there is no SSH or key pair (AP-13 stays fixed in modern; legacy has none either). Until the contract migration the rollback is to put the cron back.
+
+**Decision:** `ShipTrack-LegacyCron` is an SSM document that embeds `scripts/lib.sh` and `scripts/legacy_cron.sh`, like the other documents (ADR-0008), with three actions: `status` (changes nothing), `remove-sla`, and `restore-sla` (copies the current release's `deploy/cron/shiptrack-sla` back). `legacy-cron.yml` runs it on one host at a time behind the `dev` environment. The proof-of-delivery sync's cron keeps its own `remove-cron` action in `pod-sync.yml`. Output is one line of words per host.
+
+**Consequences:** Wave 3 step 1 and its rollback are two workflow runs and need no host access. A host launched after the removal gets the SLA cron again from its launch template, so the Auto Scaling group going to 0 at the end of wave 3 is what makes the removal final; if a host is replaced in between, `status` shows it and `remove-sla` runs again. The removal is only a rollback until the contract migration; nothing here changes that point of no return.

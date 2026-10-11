@@ -236,6 +236,19 @@ run "the_pod_sync_document_is_a_small_closed_set_of_actions" {
   }
 }
 
+run "the_legacy_cron_document_is_a_small_closed_set_of_actions" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_ssm_document.legacy_cron.name == "ShipTrack-LegacyCron",
+      toset(jsondecode(aws_ssm_document.legacy_cron.content).parameters.action.allowedValues) == toset(["status", "remove-sla", "restore-sla"]),
+      can(regex("restore-sla", jsondecode(aws_ssm_document.legacy_cron.content).mainSteps[0].inputs.runCommand[0])),
+    ])
+    error_message = "ShipTrack-LegacyCron takes one of three actions and embeds scripts/legacy_cron.sh."
+  }
+}
+
 run "the_evidence_document_runs_only_allow_listed_read_only_checks" {
   command = plan
 

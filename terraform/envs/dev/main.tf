@@ -345,6 +345,44 @@ resource "aws_ssm_document" "pod_sync" {
   })
 }
 
+# --- Legacy cron control (cutover wave 3) ----------------------------------------------------------
+# Reports on, removes, or restores the SLA scan cron on a host (ADR-0012). The workflow
+# legacy-cron.yml dispatches it, one host at a time. The proof-of-delivery sync's cron is removed
+# with ShipTrack-PodSync remove-cron.
+
+resource "aws_ssm_document" "legacy_cron" {
+  name            = "ShipTrack-LegacyCron"
+  document_type   = "Command"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Report on, remove, or restore the SLA scan cron on this host"
+    parameters = {
+      action = {
+        type          = "String"
+        description   = "What to do"
+        allowedValues = ["status", "remove-sla", "restore-sla"]
+      }
+    }
+    mainSteps = [{
+      action = "aws:runShellScript"
+      name   = "run"
+      inputs = {
+        runCommand = [join("\n", [
+          "set -euo pipefail",
+          "cat >/tmp/shiptrack-legacy-cron.sh <<'SHIPTRACK_EOF_SCRIPT'",
+          file("${local.scripts}/lib.sh"),
+          file("${local.scripts}/legacy_cron.sh"),
+          "SHIPTRACK_EOF_SCRIPT",
+          "bash /tmp/shiptrack-legacy-cron.sh '{{ action }}'",
+          "rm -f /tmp/shiptrack-legacy-cron.sh",
+        ])]
+      }
+    }]
+  })
+}
+
 # --- Evidence checks ------------------------------------------------------------------------------
 # Read-only queries that need the private database, so they run on a host (ADR-0004). The document
 # runs one allow-listed check and returns a single line of numbers. The workflow evidence.yml
