@@ -1,9 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { StackBadge } from "../components/StackBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { Timeline } from "../components/Timeline";
-import { StackProvider, stackFromNavigation, useStack } from "../stack";
+import { StackProvider, useStack } from "../stack";
 import { trackView } from "./helpers";
 
 describe("StatusBadge", () => {
@@ -70,39 +70,34 @@ describe("StackBadge", () => {
 });
 
 describe("the stack of the page", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  function navigation(entries: unknown[]): void {
-    vi.spyOn(performance, "getEntriesByType").mockReturnValue(entries as PerformanceEntry[]);
-  }
-
-  it("is read from the Server-Timing header of the document, before any API call", () => {
-    navigation([{ serverTiming: [{ name: "stack", description: "legacy" }] }]);
-    expect(stackFromNavigation()).toBe("legacy");
+  it("is shown as soon as the probe answers, before any API call", async () => {
     render(
-      <StackProvider>
+      <StackProvider probe={() => Promise.resolve("legacy")}>
         <StackBadge />
       </StackProvider>,
     );
-    expect(screen.getByText("Served by: legacy")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: legacy")).toBeInTheDocument();
   });
 
-  it("ignores other server timings and an empty value", () => {
-    navigation([{ serverTiming: [{ name: "db", description: "modern" }] }]);
-    expect(stackFromNavigation()).toBeNull();
-    navigation([{ serverTiming: [{ name: "stack", description: "" }] }]);
-    expect(stackFromNavigation()).toBeNull();
+  it("stays a dash when the probe has no answer", async () => {
+    const probe = vi.fn(() => Promise.resolve(null));
+    render(
+      <StackProvider probe={probe}>
+        <StackBadge />
+      </StackProvider>,
+    );
+    await waitFor(() => {
+      expect(probe).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByText("Served by: —")).toBeInTheDocument();
   });
 
-  it("is unknown when the browser has no navigation entry", () => {
-    navigation([]);
-    expect(stackFromNavigation()).toBeNull();
-  });
-
-  it("is replaced by the stack of an API response", () => {
-    navigation([{ serverTiming: [{ name: "stack", description: "legacy" }] }]);
+  it("does not overwrite the stack of an API response that arrived first", async () => {
+    let answer: (stack: string) => void = () => undefined;
+    const slow = () =>
+      new Promise<string | null>((resolve) => {
+        answer = resolve;
+      });
     function Setter() {
       const { setStack } = useStack();
       return (
@@ -117,12 +112,51 @@ describe("the stack of the page", () => {
       );
     }
     render(
-      <StackProvider>
+      <StackProvider probe={slow}>
         <Setter />
         <StackBadge />
       </StackProvider>,
     );
     screen.getByRole("button").click();
-    return screen.findByText("Served by: modern");
+    expect(await screen.findByText("Served by: modern")).toBeInTheDocument();
+    answer("legacy");
+    await Promise.resolve();
+    expect(screen.getByText("Served by: modern")).toBeInTheDocument();
+  });
+});
+
+describe("probeStack", () => {
+  async function real() {
+    return (await vi.importActual<typeof import("../stackProbe")>("../stackProbe")).probeStack;
+  }
+
+  it("reads the stack header of a GET of the UI's base path", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response("<html></html>", { headers: { "X-ShipTrack-Stack": "modern" } })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await (await real())()).toBe("modern");
+    // The base path of the build: "/ui/" in the image, whatever the test runner uses here.
+    expect(fetchMock).toHaveBeenCalledWith(
+      import.meta.env.BASE_URL,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("reads it from an error status too", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(new Response("no", { status: 404, headers: { "X-ShipTrack-Stack": "legacy" } })),
+      ),
+    );
+    expect(await (await real())()).toBe("legacy");
+  });
+
+  it("is null when the header is absent or the request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("ok"))));
+    expect(await (await real())()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+    expect(await (await real())()).toBeNull();
   });
 });
