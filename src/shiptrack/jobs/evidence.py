@@ -5,7 +5,7 @@ or gate a cutover step run here, on a host that can. Each check prints one line 
 nothing else: no row, key, tracking number, or address reaches a log of a public repository.
 
     POD_GATE file_uris_older_than_5_minutes=<n>          exit 1 when n > 0   (cutover gate G-POD)
-    SLA_DUPLICATES shipments=<n> extra_alerts=<m>        exit 0              (AP-09 evidence)
+    SLA_DUPLICATES shipments=<n> extra_alerts=<m> alerts=<t>   exit 0       (AP-09 evidence)
     LEDGER_VERIFY accepted=<a> persisted=<p> missing=<m> exit 1 when m > 0   (AP-06 and wave 2)
 """
 
@@ -64,6 +64,11 @@ def sla_duplicates(session: Session) -> tuple[int, int]:
     return int(shipments), int(extra)
 
 
+def sla_alert_total(session: Session) -> int:
+    """All SLA alerts: with the duplicates, it shows that scans raised breaches once each."""
+    return int(session.scalar(select(func.count()).select_from(SlaAlert)) or 0)
+
+
 def psycopg_url(settings: Settings) -> str:
     """The connection URL psycopg itself takes, built in memory and never printed or logged."""
     url = URL.create(
@@ -115,7 +120,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"POD_GATE file_uris_older_than_{POD_GATE_MINUTES}_minutes={count}")
                 return 1 if count else 0
             shipments, extra = sla_duplicates(session)
-            print(f"SLA_DUPLICATES shipments={shipments} extra_alerts={extra}")
+            print(
+                f"SLA_DUPLICATES shipments={shipments} extra_alerts={extra} "
+                f"alerts={sla_alert_total(session)}"
+            )
             return 0
     finally:
         engine.dispose()
