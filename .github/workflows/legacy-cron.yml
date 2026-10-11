@@ -1,0 +1,62 @@
+name: legacy-cron
+
+# Reports on, removes, or restores the SLA scan cron on every legacy host, one at a time (cutover
+# wave 3, ADR-0012). `status` changes nothing.
+#
+# Wave 3 step 1 is `remove-sla` here and `remove-cron` in pod-sync.yml, then `status` to see both
+# files gone. Before the contract migration, `restore-sla` puts the SLA cron back as the rollback.
+#
+# Nothing secret passes through this workflow. The output is one line of words per host.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do on every legacy host"
+        required: true
+        type: choice
+        default: status
+        options:
+          - status
+          - remove-sla
+          - restore-sla
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-legacy-dev
+  cancel-in-progress: false
+
+jobs:
+  cron:
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Run the action on every host, one at a time
+        env:
+          DOCUMENT: ShipTrack-LegacyCron
+          ACTION: ${{ inputs.action }}
+          OUTPUT_FILE: ${{ runner.temp }}/legacy-cron-output.txt
+          MAX_CONCURRENCY: "1"
+          TIMEOUT_SECONDS: "300"
+        run: |
+          export PARAMETERS="{\"action\":[\"$ACTION\"]}"
+          .github/scripts/ssm-run.sh
+          # One line per host; safe to show.
+          grep -E '^legacy cron ' "$OUTPUT_FILE" || true

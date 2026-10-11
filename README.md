@@ -23,7 +23,7 @@ clean, typed, and tested.
 | L3 Terraform | Done and applied: `terraform/envs/dev`, `terraform/modules/app_host` |
 | L4 CI/CD | Done and in use (workflows below) |
 | L5 Assessment tooling | Partly: `evidence.yml` and the `ShipTrack-Evidence` document (the G-POD gate, AP-09 duplicates, and the ledger check) are built (ADR-0004). Not started: `assess.yml`, the assessment reports, and the anti-pattern evidence procedures |
-| L6 v1.1.0 | Built and tested, not yet deployed or tagged: the S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
+| L6 v1.1.0 | Done: deployed and tagged `v1.1.0`. The S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
 
 The stack is deployed and serving through the platform ALB. `simulate.yml` has seeded it with
 shipments, events, and proof-of-delivery files.
@@ -54,6 +54,7 @@ and the `dev` environment requires a reviewer.
 | `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
 | `rollback.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
 | `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack |
+| `legacy-cron.yml` | by hand | Cutover wave 3: reports on, removes (`remove-sla`), or restores the SLA scan cron on each legacy host, one at a time. One line of words per host |
 | `evidence.yml` | by hand | Runs one read-only check on a host against the private database: `pod-gate` (cutover gate G-POD), `sla-duplicates`, or `ledger-verify`. Shows one line of numbers |
 | `pod-sync.yml` | by hand | v1.1.0: moves each host's proof-of-delivery files to S3 (`dry-run`, `migrate`), and installs or removes the per-minute sync (`install-cron`, `remove-cron`). One host at a time |
 | `resolve-ami.yml` | by hand | Prints the current Amazon Linux 2023 AMI to pin in `terraform.tfvars` (AP-14) |
