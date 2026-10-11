@@ -51,7 +51,7 @@ and the `dev` environment requires a reviewer.
 | `terraform-pr.yml` | pull requests touching Terraform | Format, validate, and a plan comment with addresses and actions only |
 | `terraform-apply.yml` | push to `dev`, or by hand | Plans and applies `terraform/envs/dev` after approval |
 | `db-bootstrap.yml` | by hand | Creates the database, roles, and schema from a legacy host (ADR-0011) |
-| `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, and smoke-tests |
+| `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
 | `rollback.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
 | `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack |
 | `resolve-ami.yml` | by hand | Prints the current Amazon Linux 2023 AMI to pin in `terraform.tfvars` (AP-14) |
