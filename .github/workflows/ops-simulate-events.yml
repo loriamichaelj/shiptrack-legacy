@@ -1,4 +1,4 @@
-name: simulate
+name: ops-simulate-events
 
 # Runs the platform's carrier event simulator against the live stack (legacy by default): it creates shipments
 # and sends their lifecycles, with duplicate, out-of-order, and exception events, and records every

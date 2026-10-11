@@ -1,4 +1,4 @@
-name: terraform-pr
+name: ci-terraform
 
 # Checks every pull request that touches Terraform. `check` needs no AWS access, so it also runs for
 # pull requests from forks. `plan` assumes the plan role, which a fork cannot reach, and posts only
@@ -13,7 +13,7 @@ on:
       - "scripts/**"
       - "deploy/**"
       - ".github/scripts/terraform-ci.sh"
-      - ".github/workflows/terraform-pr.yml"
+      - ".github/workflows/ci-terraform.yml"
 
 permissions:
   contents: read

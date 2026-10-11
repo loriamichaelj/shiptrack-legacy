@@ -9,5 +9,5 @@ capacity             = 2
 root_volume_size_gib = 100
 
 # LEGACY AP-14: the AMI is resolved once and pinned; nothing refreshes it. This is
-# al2023-ami-2023.12.20260930.0-kernel-6.18-x86_64 in us-east-1, found by the resolve-ami workflow.
+# al2023-ami-2023.12.20260930.0-kernel-6.18-x86_64 in us-east-1, read from the public Amazon Linux 2023 AMI parameter.
 ami_id = "ami-0d27e0fb3bac4d724"

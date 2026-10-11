@@ -1,4 +1,4 @@
-name: db-bootstrap
+name: ops-db-bootstrap
 
 # Creates the ShipTrack database, its two login roles, and the schema by running the platform's
 # db/bootstrap.sql on one legacy host (ADR-0011). Run it once after the first terraform-apply and

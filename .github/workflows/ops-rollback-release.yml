@@ -1,4 +1,4 @@
-name: rollback
+name: ops-rollback-release
 
 # Points every host back at the previous release, or at a given one, and records the result in
 # /shiptrack/legacy/current_release (instances may not write it). The database is NOT rolled back.

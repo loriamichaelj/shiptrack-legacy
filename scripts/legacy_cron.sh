@@ -8,7 +8,7 @@
 #   restore-sla  put the current release's deploy/cron/shiptrack-sla back (rollback before the
 #                contract migration)
 #
-# The per-minute proof-of-delivery sync has its own action, pod-sync.yml remove-cron.
+# The per-minute proof-of-delivery sync has its own action, ops-pod-sync.yml remove-cron.
 # A host launched after the removal gets the SLA cron again from its launch template; the Auto
 # Scaling group goes to 0 at the end of wave 3, so that window is short.
 # Environment (for tests): LEGACY_CRON_DIR.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plan or apply terraform/envs/dev. Run by terraform-pr.yml and terraform-apply.yml.
+# Plan or apply terraform/envs/dev. Run by ci-terraform.yml and apply-terraform.yml.
 # Usage: .github/scripts/terraform-ci.sh plan|apply
 #
 # The state bucket name contains the account ID, so the backend is configured at init time instead
