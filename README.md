@@ -53,7 +53,7 @@ and the `dev` environment requires a reviewer.
 | `db-bootstrap.yml` | by hand | Creates the database, roles, and schema from a legacy host (ADR-0011) |
 | `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
 | `rollback.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
-| `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack |
+| `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack; `target` is `legacy` (pinned), `modern` (pinned), or `none` (the ALB's weights, which covers both stacks during a cutover) |
 | `legacy-cron.yml` | by hand | Cutover wave 3: reports on, removes (`remove-sla`), or restores the SLA scan cron on each legacy host, one at a time. One line of words per host |
 | `evidence.yml` | by hand | Runs one read-only check on a host against the private database: `pod-gate` (cutover gate G-POD), `sla-duplicates`, or `ledger-verify`. Shows one line of numbers |
 | `pod-sync.yml` | by hand | v1.1.0: moves each host's proof-of-delivery files to S3 (`dry-run`, `migrate`), and installs or removes the per-minute sync (`install-cron`, `remove-cron`). One host at a time |
