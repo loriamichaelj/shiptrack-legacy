@@ -23,7 +23,7 @@ clean, typed, and tested.
 | L3 Terraform | Done and applied: `terraform/envs/dev`, `terraform/modules/app_host` |
 | L4 CI/CD | Done and in use (workflows below) |
 | L5 Assessment tooling | Not started: `assess.yml`, `evidence.yml`, the evidence SSM document |
-| L6 v1.1.0 | On request only |
+| L6 v1.1.0 | Built and tested, not yet deployed or tagged: the S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
 
 The stack is deployed and serving through the platform ALB. `simulate.yml` has seeded it with
 shipments, events, and proof-of-delivery files.
@@ -54,6 +54,7 @@ and the `dev` environment requires a reviewer.
 | `deploy.yml` | push to `dev` that changes the app, or by hand | Builds the tarball, migrates, deploys to each host in turn, records the release, waits for the ALB to serve the stack, and runs the platform contract suite's `smoke` subset against it (`platform_ref` picks the platform commit; default `dev`) |
 | `rollback.yml` | by hand | Points the hosts back at the previous release; the database is not rolled back |
 | `simulate.yml` | by hand | Runs the platform's carrier event simulator against the live stack |
+| `pod-sync.yml` | by hand | v1.1.0: moves each host's proof-of-delivery files to S3 (`dry-run`, `migrate`), and installs or removes the per-minute sync (`install-cron`, `remove-cron`). One host at a time |
 | `resolve-ami.yml` | by hand | Prints the current Amazon Linux 2023 AMI to pin in `terraform.tfvars` (AP-14) |
 
 First run, in order: `terraform-apply`, then `db-bootstrap`, then `deploy`. The URL is the platform

@@ -38,6 +38,11 @@ variable "secrets_key_arn" {
   type        = string
 }
 
+variable "data_key_arn" {
+  description = "ARN of the platform data key, which encrypts the proof-of-delivery bucket. Release v1.1.0 reads and writes that bucket during the migration (ADR-0003)."
+  type        = string
+}
+
 variable "logs_key_arn" {
   description = "ARN of the platform logs key, which encrypts the log groups."
   type        = string

@@ -124,6 +124,8 @@ jobs:
         run: tests/workflows/test_ssm_run.sh
       - name: Test the database bootstrap script against fake programs
         run: tests/workflows/test_db_bootstrap.sh
+      - name: Test pod_sync.sh against a fake release tree
+        run: tests/workflows/test_pod_sync.sh
       - name: Build the release tarball (not uploaded)
         run: scripts/build_tarball.sh "${GITHUB_SHA::12}"
       - name: Install it on amazonlinux:2023 and exercise deploy, rollback, and nginx

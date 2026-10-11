@@ -63,6 +63,14 @@ override_data {
   values = { value = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000c" }
 }
 override_data {
+  target = data.aws_ssm_parameter.platform["kms_data_key_arn"]
+  values = { value = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-00000000000a" }
+}
+override_data {
+  target = data.aws_ssm_parameter.platform["pod_bucket_name"]
+  values = { value = "shiptrack-pod-mock" }
+}
+override_data {
   target = data.aws_ssm_parameter.platform["rds_endpoint"]
   values = { value = "shiptrack-db.example.test" }
 }
@@ -203,5 +211,27 @@ run "the_db_bootstrap_document_is_pinned_and_checked" {
       can(regex("bash /tmp/shiptrack-db-bootstrap.sh", jsondecode(aws_ssm_document.db_bootstrap.content).mainSteps[0].inputs.runCommand[0])),
     ])
     error_message = "The document takes a full commit and a checksum, defaults to the RDS master secret, and runs the embedded script."
+  }
+}
+
+run "the_pod_sync_document_is_a_small_closed_set_of_actions" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      aws_ssm_document.pod_sync.name == "ShipTrack-PodSync",
+      toset(jsondecode(aws_ssm_document.pod_sync.content).parameters.action.allowedValues) == toset(["dry-run", "migrate", "install-cron", "remove-cron"]),
+      jsondecode(aws_ssm_document.pod_sync.content).parameters.podBucket.allowedPattern == "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+      jsondecode(aws_ssm_document.pod_sync.content).parameters.podBucket.default == "shiptrack-pod-mock",
+    ])
+    error_message = "ShipTrack-PodSync takes one of four actions and a validated bucket name, defaulting to the platform's POD bucket."
+  }
+
+  assert {
+    condition = alltrue([
+      can(regex("install-cron", jsondecode(aws_ssm_document.pod_sync.content).mainSteps[0].inputs.runCommand[0])),
+      can(regex("migrate_pod_to_s3.py", jsondecode(aws_ssm_document.pod_sync.content).mainSteps[0].inputs.runCommand[0])),
+    ])
+    error_message = "The document embeds scripts/pod_sync.sh."
   }
 }
