@@ -16,7 +16,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0010 | `l4-workflow-decisions` | Accepted |
 | 0011 | `database-bootstrap-from-a-host` | Accepted |
 | 0012 | `sla-cron-control-via-ssm` | Accepted |
-| 0013 | `data-reset-by-gated-workflow` | Accepted |
+| 0013 | `data-reset-by-gated-workflow` | Superseded by platform ADR-0034 |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -163,15 +163,10 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0013: data-reset-by-gated-workflow
 
-**Status:** Accepted
+**Status:** Superseded by platform ADR-0034
 
-**Context:** Synthetic traffic, the simulator, and the contract suites create shipments that nothing deletes: the API has no delete and the contract is frozen. Modern's live page and Browse read every shipment, so the data only grows. The owner asked for a workflow that resets all the data.
+**Context:** Nothing deletes shipments: the API has no delete and the contract is frozen, so the data only grows. The owner asked for a workflow that resets it. It was first built here as `ShipTrack-ResetData` and `ops-reset-data.yml`, because a legacy host is the one place a workflow can reach the private database from (ADR-0011).
 
-**Decision:**
-- `ShipTrack-ResetData` is an SSM document, like the others, that carries its own copy of `scripts/reset_data.py` and `scripts/reset_data.sh`, so it does not depend on a deploy. `ops-reset-data.yml` runs it on every host, one at a time, behind the `dev` environment's reviewer.
-- It refuses unless the confirmation is exactly `delete-all-shipments`, both in the workflow and in the document's allowed pattern, which has no default.
-- Order: the database in one transaction (alerts, documents, events, shipments), then the objects under `pod/` in the proof-of-delivery bucket, then each host's local files. A failure in the database leaves the files alone.
-- Carriers and the schema are kept. Five demo shipments with fixed tracking numbers (`MF0000000001` to `MF0000000005`, one in each of five statuses) are created afterwards unless `seed_demo` is `no`, so that there is always something to look up.
-- Output is counts and those five synthetic tracking numbers.
+**Decision:** The reset moved to `shiptrack-platform` before it was ever run, because the database and the proof-of-delivery bucket are the platform's and both stacks read them. The workflow, the job, and its tests were removed from this repository. The SSM document it had created is not deleted: this Terraform forgets it, and the platform's Terraform adopts it by import.
 
-**Consequences:** It is the only thing that deletes shipments, it cannot be undone, and it needs a person to approve it. Events still in the queue for shipments that are gone fail to apply and end in the dead-letter queue, so the traffic must be stopped and the queue drained first; the workflow says so, and nothing checks it. Versioned buckets keep earlier versions of the removed documents as noncurrent versions, unreachable from the application. The seeded numbers are fixed, so a later run reuses them.
+**Consequences:** This repository holds no code that deletes shipments. The reset still runs on these hosts, through the platform's document, so it depends on them while they exist.

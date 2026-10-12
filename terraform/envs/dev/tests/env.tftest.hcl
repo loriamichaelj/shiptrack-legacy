@@ -249,21 +249,6 @@ run "the_legacy_cron_document_is_a_small_closed_set_of_actions" {
   }
 }
 
-run "the_reset_document_needs_the_exact_confirmation" {
-  command = plan
-
-  assert {
-    condition = alltrue([
-      aws_ssm_document.reset_data.name == "ShipTrack-ResetData",
-      jsondecode(aws_ssm_document.reset_data.content).parameters.confirm.allowedPattern == "^delete-all-shipments$",
-      !can(jsondecode(aws_ssm_document.reset_data.content).parameters.confirm.default),
-      toset(jsondecode(aws_ssm_document.reset_data.content).parameters.seed.allowedValues) == toset(["yes", "no"]),
-      can(regex("delete_everything", jsondecode(aws_ssm_document.reset_data.content).mainSteps[0].inputs.runCommand[0])),
-    ])
-    error_message = "ShipTrack-ResetData takes no default confirmation, only delete-all-shipments, and embeds the job."
-  }
-}
-
 run "the_evidence_document_runs_only_allow_listed_read_only_checks" {
   command = plan
 

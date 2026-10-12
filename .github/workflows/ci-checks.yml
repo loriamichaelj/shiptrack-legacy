@@ -130,8 +130,6 @@ jobs:
         run: tests/workflows/test_evidence.sh
       - name: Test legacy_cron.sh against a fake host tree
         run: tests/workflows/test_legacy_cron.sh
-      - name: Test reset_data.sh against a fake release and aws
-        run: tests/workflows/test_reset_data.sh
       - name: Build the release tarball (not uploaded)
         run: scripts/build_tarball.sh "${GITHUB_SHA::12}"
       - name: Install it on amazonlinux:2023 and exercise deploy, rollback, and nginx
