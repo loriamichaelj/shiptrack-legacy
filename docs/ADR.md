@@ -167,6 +167,6 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 **Context:** Nothing deletes shipments: the API has no delete and the contract is frozen, so the data only grows. The owner asked for a workflow that resets it. It was first built here as `ShipTrack-ResetData` and `ops-reset-data.yml`, because a legacy host is the one place a workflow can reach the private database from (ADR-0011).
 
-**Decision:** The reset moved to `shiptrack-platform` before it was ever run, because the database and the proof-of-delivery bucket are the platform's and both stacks read them. The workflow, the job, and its tests were removed from this repository. The SSM document it had created is not deleted: this Terraform forgets it, and the platform's Terraform adopts it by import.
+**Decision:** The reset moved to `shiptrack-platform` before it was ever run, because the database and the proof-of-delivery bucket are the platform's and both stacks read them. The workflow, the job, and its tests were removed from this repository. The SSM document it had created was not deleted: this Terraform forgot it, and the platform's Terraform adopted it by import. Both handoff blocks were removed once the applies had run.
 
 **Consequences:** This repository holds no code that deletes shipments. The reset still runs on these hosts, through the platform's document, so it depends on them while they exist.
