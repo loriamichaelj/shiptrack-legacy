@@ -383,18 +383,6 @@ resource "aws_ssm_document" "legacy_cron" {
   })
 }
 
-# --- Data reset -------------------------------------------------------------------------------------
-# ShipTrack-ResetData moved to shiptrack-platform (platform ADR-0034), which now manages the document.
-# This state forgets it without deleting it. Once an apply has run, this block can be removed.
-
-removed {
-  from = aws_ssm_document.reset_data
-
-  lifecycle {
-    destroy = false
-  }
-}
-
 # --- Evidence checks ------------------------------------------------------------------------------
 # Read-only queries that need the private database, so they run on a host (ADR-0004). The document
 # runs one allow-listed check and returns a single line of numbers. The workflow check-evidence.yml

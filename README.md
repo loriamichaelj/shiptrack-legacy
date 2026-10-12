@@ -30,6 +30,8 @@ is on the platform's preview port, for the addresses that port allows (platform 
 and sync cron jobs are removed (`ops-legacy-cron.yml`, `ops-pod-sync.yml`), so it does not scan or sync.
 To fall back to it, suspend modern's SLA CronJob before restoring legacy's cron.
 `ops-simulate-events.yml` has seeded the stack with shipments, events, and proof-of-delivery files.
+Clearing them is the platform's `ops-reset-data` (platform ADR-0034): it runs the `ShipTrack-ResetData`
+document on these hosts one at a time, because they can reach the private database.
 
 ## Layout
 
