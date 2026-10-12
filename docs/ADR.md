@@ -16,6 +16,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0010 | `l4-workflow-decisions` | Accepted |
 | 0011 | `database-bootstrap-from-a-host` | Accepted |
 | 0012 | `sla-cron-control-via-ssm` | Accepted |
+| 0013 | `data-reset-by-gated-workflow` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -159,3 +160,18 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** `ShipTrack-LegacyCron` is an SSM document that embeds `scripts/lib.sh` and `scripts/legacy_cron.sh`, like the other documents (ADR-0008), with three actions: `status` (changes nothing), `remove-sla`, and `restore-sla` (copies the current release's `deploy/cron/shiptrack-sla` back). `ops-legacy-cron.yml` runs it on one host at a time behind the `dev` environment. The proof-of-delivery sync's cron keeps its own `remove-cron` action in `ops-pod-sync.yml`. Output is one line of words per host.
 
 **Consequences:** Wave 3 step 1 and its rollback are two workflow runs and need no host access. A host launched after the removal gets the SLA cron again from its launch template, so the Auto Scaling group going to 0 at the end of wave 3 is what makes the removal final; if a host is replaced in between, `status` shows it and `remove-sla` runs again. The removal is only a rollback until the contract migration; nothing here changes that point of no return.
+
+## ADR-0013: data-reset-by-gated-workflow
+
+**Status:** Accepted
+
+**Context:** Synthetic traffic, the simulator, and the contract suites create shipments that nothing deletes: the API has no delete and the contract is frozen. Modern's live page and Browse read every shipment, so the data only grows. The owner asked for a workflow that resets all the data.
+
+**Decision:**
+- `ShipTrack-ResetData` is an SSM document, like the others, that carries its own copy of `scripts/reset_data.py` and `scripts/reset_data.sh`, so it does not depend on a deploy. `ops-reset-data.yml` runs it on every host, one at a time, behind the `dev` environment's reviewer.
+- It refuses unless the confirmation is exactly `delete-all-shipments`, both in the workflow and in the document's allowed pattern, which has no default.
+- Order: the database in one transaction (alerts, documents, events, shipments), then the objects under `pod/` in the proof-of-delivery bucket, then each host's local files. A failure in the database leaves the files alone.
+- Carriers and the schema are kept. Five demo shipments with fixed tracking numbers (`MF0000000001` to `MF0000000005`, one in each of five statuses) are created afterwards unless `seed_demo` is `no`, so that there is always something to look up.
+- Output is counts and those five synthetic tracking numbers.
+
+**Consequences:** It is the only thing that deletes shipments, it cannot be undone, and it needs a person to approve it. Events still in the queue for shipments that are gone fail to apply and end in the dead-letter queue, so the traffic must be stopped and the queue drained first; the workflow says so, and nothing checks it. Versioned buckets keep earlier versions of the removed documents as noncurrent versions, unreachable from the application. The seeded numbers are fixed, so a later run reuses them.

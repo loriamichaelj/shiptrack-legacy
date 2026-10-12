@@ -383,6 +383,60 @@ resource "aws_ssm_document" "legacy_cron" {
   })
 }
 
+# --- Data reset -------------------------------------------------------------------------------------
+# Deletes every shipment and its proof-of-delivery files, and can seed five demo shipments (ADR-0013).
+# The workflow ops-reset-data.yml dispatches it, one host at a time, behind the dev environment and
+# a typed confirmation. The document carries its own copy of the job, so it needs no deploy.
+
+resource "aws_ssm_document" "reset_data" {
+  name            = "ShipTrack-ResetData"
+  document_type   = "Command"
+  document_format = "JSON"
+
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Delete every shipment and its proof-of-delivery files, and optionally seed five"
+    parameters = {
+      confirm = {
+        type           = "String"
+        description    = "Must be delete-all-shipments"
+        allowedPattern = "^delete-all-shipments$"
+      }
+      podBucket = {
+        type           = "String"
+        description    = "The proof-of-delivery bucket"
+        allowedPattern = "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+        default        = local.platform.pod_bucket_name
+      }
+      seed = {
+        type          = "String"
+        description   = "Whether to create five demo shipments afterwards"
+        allowedValues = ["yes", "no"]
+        default       = "yes"
+      }
+    }
+    mainSteps = [{
+      action = "aws:runShellScript"
+      name   = "run"
+      inputs = {
+        runCommand = [join("\n", [
+          "set -euo pipefail",
+          "cat >/tmp/shiptrack-reset-data.py <<'SHIPTRACK_EOF_JOB'",
+          file("${local.scripts}/reset_data.py"),
+          "SHIPTRACK_EOF_JOB",
+          "chmod 0644 /tmp/shiptrack-reset-data.py",
+          "cat >/tmp/shiptrack-reset-data.sh <<'SHIPTRACK_EOF_SCRIPT'",
+          file("${local.scripts}/lib.sh"),
+          file("${local.scripts}/reset_data.sh"),
+          "SHIPTRACK_EOF_SCRIPT",
+          "bash /tmp/shiptrack-reset-data.sh '{{ confirm }}' '{{ podBucket }}' '{{ seed }}'",
+          "rm -f /tmp/shiptrack-reset-data.sh /tmp/shiptrack-reset-data.py",
+        ])]
+      }
+    }]
+  })
+}
+
 # --- Evidence checks ------------------------------------------------------------------------------
 # Read-only queries that need the private database, so they run on a host (ADR-0004). The document
 # runs one allow-listed check and returns a single line of numbers. The workflow check-evidence.yml
