@@ -302,7 +302,7 @@ resource "aws_ssm_document" "db_bootstrap" {
 }
 
 # --- Proof-of-delivery sync (release v1.1.0) ------------------------------------------------------
-# Moves each host's local POD files to the platform POD bucket and installs or removes the
+# Moves each host's local proof-of-delivery files to the platform proof-of-delivery bucket and installs or removes the
 # per-minute sync (design section 8, ADR-0002 and ADR-0003). The workflow ops-pod-sync.yml dispatches it, one host at a
 # time, because each host holds different files.
 

@@ -23,7 +23,7 @@ def test_other_schemes_and_incomplete_uris_are_not_s3() -> None:
 
 def test_the_key_is_the_one_the_modern_stack_uses() -> None:
     shipment, document = uuid.uuid4(), uuid.uuid4()
-    assert s3.pod_key(shipment, document) == f"pod/{shipment}/{document}"
+    assert s3.proof_of_delivery_key(shipment, document) == f"pod/{shipment}/{document}"
 
 
 def test_checksum_is_base64_of_the_raw_digest() -> None:

@@ -5,8 +5,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | # | Title | Status |
 |---|---|---|
 | 0001 | `kms-decrypt-for-cmk-secret` | Accepted |
-| 0002 | `podsync-interval-and-window` | Accepted |
-| 0003 | `v1.1-kms-on-pod-bucket` | Accepted |
+| 0002 | `proof-of-delivery-sync-interval-and-window` | Accepted |
+| 0003 | `v1.1-kms-on-proof-of-delivery-bucket` | Accepted |
 | 0004 | `evidence-via-ssm-and-workflows` | Accepted |
 | 0005 | `aws-emulator-in-ci` | Accepted |
 | 0006 | `ui-toolchain-versions` | Accepted |
@@ -17,6 +17,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0011 | `database-bootstrap-from-a-host` | Accepted |
 | 0012 | `sla-cron-control-via-ssm` | Accepted |
 | 0013 | `data-reset-by-gated-workflow` | Superseded by platform ADR-0034 |
+| 0014 | `proof-of-delivery-naming` | Accepted |
 
 ## ADR-0001: kms-decrypt-for-cmk-secret
 
@@ -30,25 +31,25 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 **Consequences:** Assessment findings about the role should list the AP-03 statements and not this one. The condition means the key cannot be used directly, only through Secrets Manager.
 
-## ADR-0002: podsync-interval-and-window
+## ADR-0002: proof-of-delivery-sync-interval-and-window
 
 **Status:** Accepted
 
-**Records:** PodSync every minute under flock; the resulting 1–2 minute window in which a legacy-uploaded POD is unreadable through modern; why a longer interval was rejected (design §8).
+**Records:** The proof-of-delivery sync every minute under flock; the resulting 1–2 minute window in which a legacy-uploaded proof of delivery is unreadable through modern; why a longer interval was rejected (design §8).
 
-**Context:** Legacy keeps each proof-of-delivery file on the host that received it (AP-05), and modern reads it from S3. During waves 2 and 3 both stacks take uploads and reads against one `pod_documents` table, so a POD uploaded to legacy is invisible to modern until it is in S3. New legacy uploads still go to local disk, because changing the upload path would be a fix to an anti-pattern that this stack must keep.
+**Context:** Legacy keeps each proof-of-delivery file on the host that received it (AP-05), and modern reads it from S3. During waves 2 and 3 both stacks take uploads and reads against one `pod_documents` table, so a proof of delivery uploaded to legacy is invisible to modern until it is in S3. New legacy uploads still go to local disk, because changing the upload path would be a fix to an anti-pattern that this stack must keep.
 
 **Decision:** `ShipTrack-PodSync` installs `/etc/cron.d/shiptrack-podsync`, which runs `scripts/migrate_pod_to_s3.py` every minute as the application user under `flock -n`, so a run that is still going is never doubled. `ops-pod-sync.yml` dispatches it on each host one at a time, with `dry-run` and `migrate` actions for the first pass and `remove-cron` for decommissioning. The window is one interval plus the run time, so about one to two minutes. A longer interval was rejected because the gate G-POD counts `file://` rows older than 5 minutes: at five minutes the window would consume the whole gate and the count could not reach zero.
 
-**Consequences:** A POD uploaded to legacy returns 404 through modern for up to about two minutes. Reads that stay on legacy are unaffected, because legacy reads either scheme. The window closes when wave 2 reaches 100%. One job runs per host per minute against the database, which is small next to the connection budget (modern ADR-0002).
+**Consequences:** A proof of delivery uploaded to legacy returns 404 through modern for up to about two minutes. Reads that stay on legacy are unaffected, because legacy reads either scheme. The window closes when wave 2 reaches 100%. One job runs per host per minute against the database, which is small next to the connection budget (modern ADR-0002).
 
-## ADR-0003: v1.1-kms-on-pod-bucket
+## ADR-0003: v1.1-kms-on-proof-of-delivery-bucket
 
 **Status:** Accepted
 
-**Records:** Even s3:* is not enough for the SSE-KMS POD bucket; the KMS grant is the only IAM change in v1.1.
+**Records:** Even s3:* is not enough for the SSE-KMS proof-of-delivery bucket; the KMS grant is the only IAM change in v1.1.
 
-**Context:** AP-03 gives the instance role `s3:*` on every resource, and the design expected that to be enough for release v1.1.0 to read and write the POD bucket. It is not: the bucket is encrypted with the platform data key, and S3 needs the caller to be allowed `kms:GenerateDataKey` to write and `kms:Decrypt` to read an object under that key. `s3:*` does not cover KMS.
+**Context:** AP-03 gives the instance role `s3:*` on every resource, and the design expected that to be enough for release v1.1.0 to read and write the proof-of-delivery bucket. It is not: the bucket is encrypted with the platform data key, and S3 needs the caller to be allowed `kms:GenerateDataKey` to write and `kms:Decrypt` to read an object under that key. `s3:*` does not cover KMS.
 
 **Decision:** The instance role gets one new statement, `UseTheDataKeyThroughS3`: `kms:GenerateDataKey` and `kms:Decrypt` on the data key only, with `kms:ViaService = s3.<region>.amazonaws.com`. The key ARN comes from the platform contract (`kms_data_key_arn`) and the bucket name from `pod_bucket_name`. It is written beside the secrets-key statement, which is also outside AP-03, and AP-03's two statements are untouched.
 
@@ -170,3 +171,13 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** The reset moved to `shiptrack-platform` before it was ever run, because the database and the proof-of-delivery bucket are the platform's and both stacks read them. The workflow, the job, and its tests were removed from this repository. The SSM document it had created was not deleted: this Terraform forgot it, and the platform's Terraform adopted it by import. Both handoff blocks were removed once the applies had run.
 
 **Consequences:** This repository holds no code that deletes shipments. The reset still runs on these hosts, through the platform's document, so it depends on them while they exist.
+
+## ADR-0014: proof-of-delivery-naming
+
+**Status:** Accepted
+
+**Context:** The abbreviation POD names the document a carrier produces when a shipment is delivered, and it is also the usual short form of a Kubernetes pod, which is what `shiptrack-modern` runs on. Across the three repositories the two readings collided in prose, diagrams, and code names.
+
+**Decision:** A proof of delivery is the file a carrier uploads through `POST /api/v1/shipments/{id}/pod` as evidence of delivery, with its row in `pod_documents`. It is written "proof of delivery" in prose, comments, messages, and documentation, and "proof-of-delivery" when it qualifies a noun. Code names say `proof_of_delivery` (modules, functions, classes, settings attributes, tests). A pod, in lower case and never abbreviated to POD, is only ever a Kubernetes pod, and this stack has none. Names that other systems, stored data, or the frozen contract depend on are kept as they are: the `/pod` API paths, the `pod_documents` table, the `pod/` S3 key prefix and `/var/lib/shiptrack/pod` directory, the `pod_dir` key in `app.ini`, the `POD_BUCKET` variable, the `pod_bucket_name` and `pod_bucket_arn` platform contract keys, the `ShipTrack-PodSync` document and its `podBucket` parameter, `pod_sync.sh`, `migrate_pod_to_s3.py`, the `shiptrack-podsync` cron file, `ops-pod-sync.yml`, and the `pod-gate` check with its `POD_GATE` output line. The gate id `G-POD` is kept and reads as the proof-of-delivery gate.
+
+**Consequences:** No behavior, schema, contract, or deployed name changes. The kept names still contain `pod`; they stand for proof of delivery and are listed here so that a search for `pod` in this repository is read as proof of delivery, never as a Kubernetes pod. The same rule is recorded in the platform and modern ADRs, where `pod` also has its Kubernetes meaning.

@@ -16,7 +16,7 @@ from sqlalchemy.engine import URL
 
 DEFAULT_CONFIG_PATH = Path("/etc/shiptrack/app.ini")
 CONFIG_ENV_VAR = "SHIPTRACK_CONFIG"
-DEFAULT_POD_DIR = Path("/var/lib/shiptrack/pod")
+DEFAULT_PROOF_OF_DELIVERY_DIR = Path("/var/lib/shiptrack/pod")
 
 
 class ConfigError(Exception):
@@ -31,7 +31,7 @@ class Settings:
     db_user: str
     db_password: str
     db_sslmode: str = "require"
-    pod_dir: Path = DEFAULT_POD_DIR
+    proof_of_delivery_dir: Path = DEFAULT_PROOF_OF_DELIVERY_DIR
     log_file: Path | None = None
     log_level: str = "INFO"
 
@@ -67,7 +67,7 @@ def load_settings(path: Path | None = None) -> Settings:
             db_user=database["user"],
             db_password=database["password"],
             db_sslmode=database.get("sslmode", "require"),
-            pod_dir=Path(app.get("pod_dir", str(DEFAULT_POD_DIR))),
+            proof_of_delivery_dir=Path(app.get("pod_dir", str(DEFAULT_PROOF_OF_DELIVERY_DIR))),
             log_file=Path(log_file) if log_file else None,
             log_level=app.get("log_level", "INFO").upper(),
         )

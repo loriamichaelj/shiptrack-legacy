@@ -46,7 +46,7 @@ def migrate(url: URL, revision: str = "head", *, downgrade: bool = False) -> Non
         engine.dispose()
 
 
-def settings_for(url: URL, pod_dir: Path) -> Settings:
+def settings_for(url: URL, proof_of_delivery_dir: Path) -> Settings:
     return Settings(
         db_host=url.host or "localhost",
         db_port=url.port or 5432,
@@ -54,7 +54,7 @@ def settings_for(url: URL, pod_dir: Path) -> Settings:
         db_user=url.username or "",
         db_password=url.password or "",
         db_sslmode="disable",
-        pod_dir=pod_dir,
+        proof_of_delivery_dir=proof_of_delivery_dir,
     )
 
 

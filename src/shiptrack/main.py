@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from shiptrack import __version__
-from shiptrack.api import events, health, pod, shipments, track
+from shiptrack.api import events, health, proof_of_delivery, shipments, track
 from shiptrack.api.errors import register_exception_handlers
 from shiptrack.config import Settings, configure_logging, load_settings
 from shiptrack.db.session import create_db_engine, create_session_factory
@@ -49,7 +49,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shipments.router)
     app.include_router(events.router)
     app.include_router(track.router)
-    app.include_router(pod.router)
+    app.include_router(proof_of_delivery.router)
     return app
 
 

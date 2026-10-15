@@ -15,16 +15,16 @@ from sqlalchemy.orm import Session
 from shiptrack.api.deps import get_shipment_or_404, parse_uuid
 from shiptrack.api.errors import ApiError, not_found
 from shiptrack.config import Settings
-from shiptrack.db.models import PodDocument
+from shiptrack.db.models import ProofOfDeliveryDocument
 from shiptrack.db.session import get_session
-from shiptrack.domain.models import PodOut
+from shiptrack.domain.models import ProofOfDeliveryOut
 from shiptrack.storage import local, s3
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
 
-MAX_POD_BYTES = 10 * 1024 * 1024
+MAX_PROOF_OF_DELIVERY_BYTES = 10 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = frozenset({"application/pdf", "image/png", "image/jpeg"})
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -38,13 +38,13 @@ def get_s3_client() -> s3.S3Client:
 S3Dep = Annotated[s3.S3Client, Depends(get_s3_client)]
 
 
-@router.post("/shipments/{shipment_id}/pod", status_code=201, response_model=PodOut)
-def upload_pod(
+@router.post("/shipments/{shipment_id}/pod", status_code=201, response_model=ProofOfDeliveryOut)
+def upload_proof_of_delivery(
     shipment_id: str,
     request: Request,
     session: SessionDep,
     file: Annotated[UploadFile, File()],
-) -> PodOut:
+) -> ProofOfDeliveryOut:
     shipment = get_shipment_or_404(session, shipment_id)
     content_type = (file.content_type or "").split(";")[0].strip().lower()
     if content_type not in ALLOWED_CONTENT_TYPES:
@@ -55,11 +55,19 @@ def upload_pod(
     settings: Settings = request.app.state.settings
     document_id = uuid.uuid4()
     try:
-        stored = local.save(settings.pod_dir, shipment.id, document_id, file.file, MAX_POD_BYTES)
+        stored = local.save(
+            settings.proof_of_delivery_dir,
+            shipment.id,
+            document_id,
+            file.file,
+            MAX_PROOF_OF_DELIVERY_BYTES,
+        )
     except local.PayloadTooLargeError as exc:
-        raise ApiError(413, "PAYLOAD_TOO_LARGE", "POD files are limited to 10 MiB") from exc
+        raise ApiError(
+            413, "PAYLOAD_TOO_LARGE", "Proof-of-delivery files are limited to 10 MiB"
+        ) from exc
 
-    document = PodDocument(
+    document = ProofOfDeliveryDocument(
         id=document_id,
         shipment_id=shipment.id,
         storage_uri=stored.uri,
@@ -75,7 +83,7 @@ def upload_pod(
         stored.path.unlink(missing_ok=True)
         raise
     session.refresh(document)
-    return PodOut(
+    return ProofOfDeliveryOut(
         document_id=document.id,
         shipment_id=document.shipment_id,
         content_type=document.content_type,
@@ -110,13 +118,13 @@ def _stream_from_s3(client: s3.S3Client, location: s3.S3Location, content_type: 
 
 
 @router.get("/shipments/{shipment_id}/pod/{document_id}", response_model=None)
-def download_pod(
+def download_proof_of_delivery(
     shipment_id: str, document_id: str, session: SessionDep, s3_client: S3Dep
 ) -> Response:
     document = session.scalar(
-        select(PodDocument).where(
-            PodDocument.id == parse_uuid(document_id, "Document"),
-            PodDocument.shipment_id == parse_uuid(shipment_id),
+        select(ProofOfDeliveryDocument).where(
+            ProofOfDeliveryDocument.id == parse_uuid(document_id, "Document"),
+            ProofOfDeliveryDocument.shipment_id == parse_uuid(shipment_id),
         )
     )
     if document is None:

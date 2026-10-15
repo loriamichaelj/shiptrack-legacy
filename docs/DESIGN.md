@@ -59,7 +59,7 @@ shiptrack-legacy/
 │   │   ├── shipments.py
 │   │   ├── events.py
 │   │   ├── track.py
-│   │   ├── pod.py
+│   │   ├── proof_of_delivery.py
 │   │   ├── health.py                      # GET / only (AP-07)
 │   │   ├── errors.py                      # error envelope and exception handlers
 │   │   ├── pagination.py                  # keyset cursor encode/decode
@@ -72,7 +72,7 @@ shiptrack-legacy/
 │   │   ├── models.py                      # SQLAlchemy ORM
 │   │   └── session.py
 │   ├── events/processor.py                # In-process queue + thread (AP-06)
-│   ├── storage/local.py                   # Local-disk POD storage (AP-05)
+│   ├── storage/local.py                   # Local-disk proof-of-delivery storage (AP-05)
 │   └── jobs/sla_scan.py                   # Cron entrypoint (AP-09)
 ├── migrations/                            # Alembic; 0001_initial creates the schema and seeds carriers
 ├── alembic.ini
@@ -286,7 +286,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 - Coverage ≥ 75% on `domain/` and `api/`.
 - The cross-stack contract suite lives in `shiptrack-platform/validation/contract`.
 - **UI:** Vitest + React Testing Library for every page state (loading, found, not found, invalid input, network error) and the tracking-number validator. `tsc --noEmit` and ESLint must be clean.
-- **Packaging:** `tests/packaging/run.sh` builds the tarball and, on a fresh `amazonlinux:2023` container, runs migrate, deploy, rollback, pruning, and checksum-failure cases plus the nginx checks: stack header on every route, UI deep links, asset caching, no security headers (AP-16), and the 10 MiB POD limit.
+- **Packaging:** `tests/packaging/run.sh` builds the tarball and, on a fresh `amazonlinux:2023` container, runs migrate, deploy, rollback, pruning, and checksum-failure cases plus the nginx checks: stack header on every route, UI deep links, asset caching, no security headers (AP-16), and the 10 MiB proof-of-delivery limit.
 - **Local development:** OrbStack provides Docker for Postgres 17 and for the `amazonlinux:2023` build container, and the unit and integration tests run against that Postgres. LocalStack (which needs an account and auth token) is used locally only for the S3, SSM, and Secrets Manager paths (`migrate_pod_to_s3.py`, v1.1); CI runs the same tests against a moto server, so fork PRs and token-less runs pass. The tests take the AWS endpoint from the environment. Real nginx, systemd, cron, and ALB behavior is validated only after deployment, in AWS. The same tests run in `ci-checks.yml`; no workflow step depends on a developer workstation.
 
 ### 3.6 Web UI (minimal)
@@ -325,7 +325,7 @@ Each entry is a requirement here and maps 1:1 to a remediation (`REM-xx`) in the
 | AP-02 | App runs as schema owner | `app.ini` uses `shiptrack_migrator` for runtime *and* migrations | `SELECT current_user` from the app | REM-02 |
 | AP-03 | Over-privileged instance role | Inline policy `s3:*` on `*`, `secretsmanager:GetSecretValue` on `*`, plus `AmazonSSMManagedInstanceCore` and `CloudWatchAgentServerPolicy` (the boundary still applies). Also `kms:Decrypt` on the platform secrets key with `kms:ViaService = secretsmanager.<region>.amazonaws.com`; this is required to read a CMK-encrypted secret and is not part of the anti-pattern | IAM Access Analyzer / Security Hub IAM findings; Checkov | REM-03 |
 | AP-04 | IMDSv1 allowed | Launch template `http_tokens = "optional"` | Security Hub EC2.8 | REM-04 |
-| AP-05 | Local-disk POD storage, masked by ALB stickiness | Files under `/var/lib/shiptrack/pod/{shipment_id}/{doc_id}` on whichever host received the upload; platform tg-legacy has stickiness on | `curl` without a cookie → ≈50% 404 on POD GET | REM-05 |
+| AP-05 | Local-disk proof-of-delivery storage, masked by ALB stickiness | Files under `/var/lib/shiptrack/pod/{shipment_id}/{doc_id}` on whichever host received the upload; platform tg-legacy has stickiness on | `curl` without a cookie → ≈50% 404 on proof of delivery GET | REM-05 |
 | AP-06 | In-process event queue | `queue.Queue` + daemon thread per gunicorn worker; 202 is returned before persistence; the queue is lost on restart | Simulator ledger `verify` shows events lost during a deploy | REM-06 |
 | AP-07 | Shallow health check | `GET /` returns `OK` without touching the DB; ASG `health_check_type = "EC2"` | Break DB access → ALB still shows healthy while the API returns 500s | REM-07 |
 | AP-08 | Unstructured file logs | Plain-text logs to `/var/log/shiptrack/*.log`, logrotate, CloudWatch agent tails files; no request IDs | Log Insights cannot correlate a request | REM-08 |
@@ -509,9 +509,9 @@ v1.1.0 is required before cutover **Wave 2**. In real migrations the legacy app 
      3. Update `storage_uri` to the `s3://…` URI.
    - Idempotent and resumable. Supports `--dry-run`. Prints counts: migrated, already migrated, missing on this host.
    - Missing-on-this-host rows are expected; the other host owns them.
-2. **POD GET handler:** when `storage_uri` starts with `s3://`, stream the object from S3 (boto3 `get_object`) and keep the 200 + bytes contract. AP-03's `s3:*` covers S3, but the POD bucket is SSE-KMS, so v1.1 must add `kms:GenerateDataKey` and `kms:Decrypt` on `shiptrack-data` (with `kms:ViaService = s3.<region>.amazonaws.com`). That is the only IAM change in v1.1. Note in the assessment that even `s3:*` was not enough.
+2. **Proof of delivery GET handler:** when `storage_uri` starts with `s3://`, stream the object from S3 (boto3 `get_object`) and keep the 200 + bytes contract. AP-03's `s3:*` covers S3, but the proof-of-delivery bucket is SSE-KMS, so v1.1 must add `kms:GenerateDataKey` and `kms:Decrypt` on `shiptrack-data` (with `kms:ViaService = s3.<region>.amazonaws.com`). That is the only IAM change in v1.1. Note in the assessment that even `s3:*` was not enough.
 3. **Coexistence sync:** new legacy uploads still go to local disk (AP-05 persists). The SSM document `ShipTrack-PodSync` installs `/etc/cron.d/shiptrack-podsync`, which runs `migrate_pod_to_s3.py` **every minute** during Waves 2–3, wrapped in `flock -n` so runs never overlap. It is removed at decommission.
-   - **Coexistence window (accepted):** new legacy uploads still land on local disk, so a POD uploaded to legacy cannot be read through modern until the next sync (one interval plus run time, about 1–2 minutes). Reads routed to legacy are unaffected. Modern's cutover gate G-POD counts only `file://` rows older than 5 minutes (modern §9.2).
+   - **Coexistence window (accepted):** new legacy uploads still land on local disk, so a proof of delivery uploaded to legacy cannot be read through modern until the next sync (one interval plus run time, about 1–2 minutes). Reads routed to legacy are unaffected. Modern's cutover gate G-POD counts only `file://` rows older than 5 minutes (modern §9.2).
 4. **Change freeze:** during Wave 2, legacy deploys are frozen. Every restart loses queued events (AP-06) while legacy still takes write traffic.
 5. Tag `v1.1.0`.
 
@@ -531,7 +531,7 @@ v1.1.0 is required before cutover **Wave 2**. In real migrations the legacy app 
 | Findings register | Every AP and scan finding is added to the shared register with disposition `accepted-legacy-AP` and its `REM-xx` link |
 
 **Evidence procedures to script** (`scripts/evidence/*`; those that read the database run on a host through `ShipTrack-Evidence`, §7.6):
-- **AP-05:** 50 cookie-less GETs of a POD document → count 404s.
+- **AP-05:** 50 cookie-less GETs of a proof-of-delivery document → count 404s.
 - **AP-06:**
   1. Start the simulator.
   2. Trigger a deploy.
@@ -539,7 +539,7 @@ v1.1.0 is required before cutover **Wave 2**. In real migrations the legacy app 
 - **AP-09:** the duplicate-alerts query above.
 - **AP-12:** ALB `HTTPCode_ELB_502_Count` and `HTTPCode_Target_5XX_Count` for tg-legacy over the deploy window.
 - **AP-16:** `curl -sI $BASE_URL/ui/` → list the missing security headers.
-- **G-POD gate (modern §9.2):** the `pod-gate` script prints the count of `file://` POD rows older than 5 minutes.
+- **G-POD gate (modern §9.2):** the `pod-gate` script prints the count of `file://` proof-of-delivery rows older than 5 minutes.
 
 ---
 

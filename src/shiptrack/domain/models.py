@@ -104,7 +104,7 @@ class TrackView(BaseModel):
     events: list[TrackEvent]
 
 
-class PodOut(BaseModel):
+class ProofOfDeliveryOut(BaseModel):
     document_id: uuid.UUID
     shipment_id: uuid.UUID
     content_type: str

@@ -69,7 +69,7 @@ def test_payload_too_large(client: TestClient, make_shipment: MakeShipment, sett
     assert too_big.status_code == 413
     assert too_big.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
     # The rejected upload leaves nothing behind.
-    stored = list((Path(settings.pod_dir) / sid).iterdir())
+    stored = list((Path(settings.proof_of_delivery_dir) / sid).iterdir())
     assert len(stored) == 1
 
 
@@ -102,10 +102,10 @@ def test_document_belongs_to_its_shipment(client: TestClient, make_shipment: Mak
 def test_file_missing_on_this_host_is_404(
     client: TestClient, make_shipment: MakeShipment, settings: Any
 ) -> None:
-    """AP-05: a POD uploaded to another host is simply not here."""
+    """AP-05: a proof of delivery uploaded to another host is simply not here."""
     sid = make_shipment()["id"]
     document_id = upload(client, sid).json()["document_id"]
-    (Path(settings.pod_dir) / sid / document_id).unlink()
+    (Path(settings.proof_of_delivery_dir) / sid / document_id).unlink()
     response = client.get(f"/api/v1/shipments/{sid}/pod/{document_id}")
     assert response.status_code == 404
 

@@ -117,8 +117,8 @@ eq "API errors carry the stack header" "$(header X-ShipTrack-Stack localhost/api
 section "nginx: proof of delivery"
 head -c 100 /dev/urandom >/tmp/small.png
 doc=$(curl -s -F "file=@/tmp/small.png;type=image/png" "localhost/api/v1/shipments/$sid/pod")
-eq "small POD is stored" "$(jq -r .size_bytes <<<"$doc")" 100
-eq "POD downloads" "$(status "localhost/api/v1/shipments/$sid/pod/$(jq -r .document_id <<<"$doc")")" 200
+eq "small proof of delivery is stored" "$(jq -r .size_bytes <<<"$doc")" 100
+eq "proof-of-delivery downloads" "$(status "localhost/api/v1/shipments/$sid/pod/$(jq -r .document_id <<<"$doc")")" 200
 head -c 10485760 /dev/zero >/tmp/ten.pdf
 eq "a file of exactly 10 MiB is accepted" "$(status -F "file=@/tmp/ten.pdf;type=application/pdf" "localhost/api/v1/shipments/$sid/pod")" 201
 head -c 10485761 /dev/zero >/tmp/ten1.pdf
