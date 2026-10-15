@@ -1,6 +1,6 @@
 name: ops-pod-sync
 
-# Moves each legacy host's proof-of-delivery files to the platform POD bucket, and installs or
+# Moves each legacy host's proof-of-delivery files to the platform proof-of-delivery bucket, and installs or
 # removes the per-minute sync (release v1.1.0, design section 8, ADR-0002). Each host holds different
 # files, so the document runs on every host, one at a time.
 #

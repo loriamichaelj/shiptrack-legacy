@@ -18,7 +18,7 @@ def test_health_returns_ok_as_plain_text(client: TestClient) -> None:
 
 def test_health_is_green_while_the_database_is_unreachable(settings: Settings) -> None:
     """AP-07: the shallow health check hides a broken database."""
-    broken = replace(settings, db_port=1, pod_dir=Path("/nonexistent"))
+    broken = replace(settings, db_port=1, proof_of_delivery_dir=Path("/nonexistent"))
     with TestClient(create_app(broken), raise_server_exceptions=False) as client:
         assert client.get("/").status_code == 200
         response = client.get("/api/v1/shipments")

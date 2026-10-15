@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from shiptrack.api.pod import get_s3_client
-from shiptrack.jobs.pod_to_s3 import migrate
+from shiptrack.api.proof_of_delivery import get_s3_client
+from shiptrack.jobs.proof_of_delivery_to_s3 import migrate
 from shiptrack.storage import s3
 from tests.fake_s3 import FakeS3
 
@@ -64,11 +64,11 @@ def test_a_document_uploaded_elsewhere_is_readable_on_this_host(
     """The sync ran on the other host: this host has no file, and the row says s3://."""
     sid = make_shipment()["id"]
     document = upload(client, sid)
-    key = s3.pod_key(uuid.UUID(sid), uuid.UUID(document["document_id"]))
+    key = s3.proof_of_delivery_key(uuid.UUID(sid), uuid.UUID(document["document_id"]))
     fake_s3.put_object(Bucket=BUCKET, Key=key, Body=PNG, ContentType="image/png")
     set_uri(engine, document["document_id"], f"s3://{BUCKET}/{key}")
     # Remove the local file as if it had never been on this host.
-    for path in (client.app.state.settings.pod_dir).rglob("*"):  # type: ignore[attr-defined]
+    for path in (client.app.state.settings.proof_of_delivery_dir).rglob("*"):  # type: ignore[attr-defined]
         if path.is_file():
             path.unlink()
 

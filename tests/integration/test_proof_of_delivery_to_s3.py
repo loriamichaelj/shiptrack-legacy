@@ -1,4 +1,4 @@
-"""The POD sync job: move a host's files to S3 and rewrite their rows."""
+"""The proof-of-delivery sync job: move a host's files to S3 and rewrite their rows."""
 
 import base64
 import hashlib
@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from shiptrack.jobs.pod_to_s3 import Counts, migrate
+from shiptrack.jobs.proof_of_delivery_to_s3 import Counts, migrate
 from shiptrack.storage import s3
 from tests.fake_s3 import FakeS3
 
@@ -64,7 +64,7 @@ def test_a_local_document_is_uploaded_and_its_row_rewritten(
 
     counts = run(client, fake)
 
-    key = s3.pod_key(uuid.UUID(sid), uuid.UUID(document["document_id"]))
+    key = s3.proof_of_delivery_key(uuid.UUID(sid), uuid.UUID(document["document_id"]))
     assert counts == Counts(migrated=1)
     assert fake.objects[(BUCKET, key)]["data"] == data
     assert uri_of(engine, document["document_id"]) == f"s3://{BUCKET}/{key}"
@@ -114,7 +114,7 @@ def test_a_file_that_is_not_on_this_host_is_counted_and_left_alone(
     client: TestClient, make_shipment: MakeShipment, fake: FakeS3, engine: Engine
 ) -> None:
     document = upload(client, make_shipment()["id"], png("e"))
-    for path in client.app.state.settings.pod_dir.rglob("*"):  # type: ignore[attr-defined]
+    for path in client.app.state.settings.proof_of_delivery_dir.rglob("*"):  # type: ignore[attr-defined]
         if path.is_file():
             path.unlink()
 
@@ -129,7 +129,7 @@ def test_a_damaged_file_is_never_uploaded(
     client: TestClient, make_shipment: MakeShipment, fake: FakeS3, engine: Engine
 ) -> None:
     document = upload(client, make_shipment()["id"], png("f"))
-    files = [p for p in client.app.state.settings.pod_dir.rglob("*") if p.is_file()]  # type: ignore[attr-defined]
+    files = [p for p in client.app.state.settings.proof_of_delivery_dir.rglob("*") if p.is_file()]  # type: ignore[attr-defined]
     files[0].write_bytes(b"damaged")
 
     counts = run(client, fake)
@@ -185,7 +185,9 @@ def test_many_documents_are_moved_independently(
 ) -> None:
     ids = [upload(client, make_shipment()["id"], png(str(i)))["document_id"] for i in range(5)]
     # One is not on this host.
-    files = sorted(p for p in client.app.state.settings.pod_dir.rglob("*") if p.is_file())  # type: ignore[attr-defined]
+    files = sorted(
+        p for p in client.app.state.settings.proof_of_delivery_dir.rglob("*") if p.is_file()
+    )  # type: ignore[attr-defined]
     files[0].unlink()
 
     counts = run(client, fake)

@@ -214,7 +214,7 @@ run "the_db_bootstrap_document_is_pinned_and_checked" {
   }
 }
 
-run "the_pod_sync_document_is_a_small_closed_set_of_actions" {
+run "the_proof_of_delivery_sync_document_is_a_small_closed_set_of_actions" {
   command = plan
 
   assert {
@@ -224,7 +224,7 @@ run "the_pod_sync_document_is_a_small_closed_set_of_actions" {
       jsondecode(aws_ssm_document.pod_sync.content).parameters.podBucket.allowedPattern == "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
       jsondecode(aws_ssm_document.pod_sync.content).parameters.podBucket.default == "shiptrack-pod-mock",
     ])
-    error_message = "ShipTrack-PodSync takes one of four actions and a validated bucket name, defaulting to the platform's POD bucket."
+    error_message = "ShipTrack-PodSync takes one of four actions and a validated bucket name, defaulting to the platform's proof-of-delivery bucket."
   }
 
   assert {

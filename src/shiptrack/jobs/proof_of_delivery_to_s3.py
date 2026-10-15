@@ -30,11 +30,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from shiptrack.config import configure_logging, load_settings
-from shiptrack.db.models import PodDocument
+from shiptrack.db.models import ProofOfDeliveryDocument
 from shiptrack.db.session import create_db_engine, create_session_factory
 from shiptrack.storage import local, s3
 
-logger = logging.getLogger("shiptrack.pod_to_s3")
+logger = logging.getLogger("shiptrack.proof_of_delivery_to_s3")
 
 READ_CHUNK = 1024 * 1024
 
@@ -82,21 +82,21 @@ def migrate(
         counts.already_migrated = (
             session.scalar(
                 select(func.count())
-                .select_from(PodDocument)
-                .where(PodDocument.storage_uri.like("s3://%"))
+                .select_from(ProofOfDeliveryDocument)
+                .where(ProofOfDeliveryDocument.storage_uri.like("s3://%"))
             )
             or 0
         )
         pending = session.execute(
             select(
-                PodDocument.id,
-                PodDocument.shipment_id,
-                PodDocument.storage_uri,
-                PodDocument.content_type,
-                PodDocument.sha256,
+                ProofOfDeliveryDocument.id,
+                ProofOfDeliveryDocument.shipment_id,
+                ProofOfDeliveryDocument.storage_uri,
+                ProofOfDeliveryDocument.content_type,
+                ProofOfDeliveryDocument.sha256,
             )
-            .where(PodDocument.storage_uri.like("file://%"))
-            .order_by(PodDocument.uploaded_at)
+            .where(ProofOfDeliveryDocument.storage_uri.like("file://%"))
+            .order_by(ProofOfDeliveryDocument.uploaded_at)
         ).all()
 
     for document_id, shipment_id, storage_uri, content_type, stored_sha in pending:
@@ -111,7 +111,9 @@ def migrate(
             logger.error("checksum mismatch, not uploading document=%s", document_id)
             continue
 
-        location = s3.S3Location(bucket=bucket, key=s3.pod_key(shipment_id, document_id))
+        location = s3.S3Location(
+            bucket=bucket, key=s3.proof_of_delivery_key(shipment_id, document_id)
+        )
         if dry_run:
             counts.migrated += 1
             continue
@@ -129,8 +131,11 @@ def migrate(
             with session_factory() as session:
                 # Only a row that still says file:// changes, so a concurrent run is harmless.
                 session.execute(
-                    update(PodDocument)
-                    .where(PodDocument.id == document_id, PodDocument.storage_uri == storage_uri)
+                    update(ProofOfDeliveryDocument)
+                    .where(
+                        ProofOfDeliveryDocument.id == document_id,
+                        ProofOfDeliveryDocument.storage_uri == storage_uri,
+                    )
                     .values(storage_uri=location.uri)
                 )
                 session.commit()

@@ -120,7 +120,7 @@ class TrackingEvent(Base):
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
-class PodDocument(Base):
+class ProofOfDeliveryDocument(Base):
     __tablename__ = "pod_documents"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)

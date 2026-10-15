@@ -1,5 +1,5 @@
 # Local development only: Postgres 17 for unit/integration tests and manual runs.
-# LocalStack (S3/SSM/Secrets Manager) is added for the v1.1 POD migration work.
+# LocalStack (S3/SSM/Secrets Manager) is added for the v1.1 proof-of-delivery migration work.
 services:
   postgres:
     image: postgres:17

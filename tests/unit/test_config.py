@@ -23,7 +23,7 @@ def test_defaults(tmp_path: Path) -> None:
     settings = load_settings(write(tmp_path, MINIMAL))
     assert settings.db_port == 5432
     assert settings.db_sslmode == "require"
-    assert settings.pod_dir == Path("/var/lib/shiptrack/pod")
+    assert settings.proof_of_delivery_dir == Path("/var/lib/shiptrack/pod")
     assert settings.log_file is None
     assert settings.log_level == "INFO"
 
@@ -37,7 +37,7 @@ def test_percent_characters_in_the_password_survive(tmp_path: Path) -> None:
 def test_app_section_overrides(tmp_path: Path) -> None:
     text = MINIMAL + "\n[app]\npod_dir = /data/pod\nlog_file = /tmp/app.log\nlog_level = debug\n"
     settings = load_settings(write(tmp_path, text))
-    assert settings.pod_dir == Path("/data/pod")
+    assert settings.proof_of_delivery_dir == Path("/data/pod")
     assert settings.log_file == Path("/tmp/app.log")
     assert settings.log_level == "DEBUG"
 

@@ -23,26 +23,27 @@ from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
 from shiptrack.config import Settings, load_settings
-from shiptrack.db.models import PodDocument, SlaAlert
+from shiptrack.db.models import ProofOfDeliveryDocument, SlaAlert
 from shiptrack.db.session import create_db_engine, create_session_factory
 
 logger = logging.getLogger("shiptrack.evidence")
 
-POD_GATE_MINUTES = 5
+PROOF_OF_DELIVERY_GATE_MINUTES = 5
 
 
-def pod_gate(session: Session) -> int:
+def proof_of_delivery_gate(session: Session) -> int:
     """Documents still stored as file:// that were uploaded more than five minutes ago.
 
     Modern reads proof of delivery from S3 only, so any such document is unreadable through it
-    beyond the accepted PodSync window. The cutover step may proceed only at zero.
+    beyond the accepted proof-of-delivery sync window. The cutover step may proceed only at zero.
     """
     count = session.scalar(
         select(func.count())
-        .select_from(PodDocument)
+        .select_from(ProofOfDeliveryDocument)
         .where(
-            PodDocument.storage_uri.like("file://%"),
-            PodDocument.uploaded_at < func.now() - text(f"interval '{POD_GATE_MINUTES} minutes'"),
+            ProofOfDeliveryDocument.storage_uri.like("file://%"),
+            ProofOfDeliveryDocument.uploaded_at
+            < func.now() - text(f"interval '{PROOF_OF_DELIVERY_GATE_MINUTES} minutes'"),
         )
     )
     return int(count or 0)
@@ -116,8 +117,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with create_session_factory(engine)() as session:
             if args.check == "pod-gate":
-                count = pod_gate(session)
-                print(f"POD_GATE file_uris_older_than_{POD_GATE_MINUTES}_minutes={count}")
+                count = proof_of_delivery_gate(session)
+                minutes = PROOF_OF_DELIVERY_GATE_MINUTES
+                print(f"POD_GATE file_uris_older_than_{minutes}_minutes={count}")
                 return 1 if count else 0
             shipments, extra = sla_duplicates(session)
             print(

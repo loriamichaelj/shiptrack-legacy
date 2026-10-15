@@ -41,7 +41,7 @@ class S3Location:
         return f"s3://{self.bucket}/{self.key}"
 
 
-def pod_key(shipment_id: uuid.UUID, document_id: uuid.UUID) -> str:
+def proof_of_delivery_key(shipment_id: uuid.UUID, document_id: uuid.UUID) -> str:
     """The object key the modern stack uses, so a document has one address on both stacks."""
     return f"pod/{shipment_id}/{document_id}"
 

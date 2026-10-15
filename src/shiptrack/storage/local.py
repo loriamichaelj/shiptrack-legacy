@@ -31,19 +31,21 @@ class StoredFile:
         return self.path.as_uri()
 
 
-def pod_path(pod_dir: Path, shipment_id: uuid.UUID, document_id: uuid.UUID) -> Path:
-    return pod_dir / str(shipment_id) / str(document_id)
+def proof_of_delivery_path(
+    proof_of_delivery_dir: Path, shipment_id: uuid.UUID, document_id: uuid.UUID
+) -> Path:
+    return proof_of_delivery_dir / str(shipment_id) / str(document_id)
 
 
 def save(
-    pod_dir: Path,
+    proof_of_delivery_dir: Path,
     shipment_id: uuid.UUID,
     document_id: uuid.UUID,
     stream: BinaryIO,
     max_bytes: int,
 ) -> StoredFile:
     """Stream `stream` to disk, computing size and sha256; reject anything over max_bytes."""
-    path = pod_path(pod_dir, shipment_id, document_id)
+    path = proof_of_delivery_path(proof_of_delivery_dir, shipment_id, document_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     size = 0

@@ -22,7 +22,7 @@ def test_too_large_is_rejected_and_nothing_is_left_behind(tmp_path: Path) -> Non
     shipment_id, document_id = uuid.uuid4(), uuid.uuid4()
     with pytest.raises(local.PayloadTooLargeError):
         local.save(tmp_path, shipment_id, document_id, io.BytesIO(b"x" * 101), max_bytes=100)
-    assert not local.pod_path(tmp_path, shipment_id, document_id).exists()
+    assert not local.proof_of_delivery_path(tmp_path, shipment_id, document_id).exists()
 
 
 def test_exactly_the_limit_is_accepted(tmp_path: Path) -> None:

@@ -46,7 +46,7 @@ def add_alert(engine: Engine, shipment_id: str) -> None:
         )
 
 
-def test_pod_gate_counts_only_old_local_documents(
+def test_proof_of_delivery_gate_counts_only_old_local_documents(
     client: TestClient, make_shipment: MakeShipment, engine: Engine
 ) -> None:
     sid = make_shipment()["id"]
@@ -56,10 +56,10 @@ def test_pod_gate_counts_only_old_local_documents(
     add_document(engine, sid, "s3://bucket/pod/a/moved", minutes_old=120)
 
     with Session(engine) as session:
-        assert evidence.pod_gate(session) == 2
+        assert evidence.proof_of_delivery_gate(session) == 2
 
 
-def test_pod_gate_is_zero_once_everything_old_is_in_s3(
+def test_proof_of_delivery_gate_is_zero_once_everything_old_is_in_s3(
     client: TestClient, make_shipment: MakeShipment, engine: Engine
 ) -> None:
     sid = make_shipment()["id"]
@@ -67,7 +67,7 @@ def test_pod_gate_is_zero_once_everything_old_is_in_s3(
     add_document(engine, sid, "file:///var/lib/shiptrack/pod/a/fresh", minutes_old=2)
 
     with Session(engine) as session:
-        assert evidence.pod_gate(session) == 0
+        assert evidence.proof_of_delivery_gate(session) == 0
 
 
 def test_sla_duplicates_counts_shipments_and_extra_alerts(
@@ -137,7 +137,7 @@ def test_cli_prints_one_line_of_numbers_and_exits_nonzero_when_the_gate_fails(
     assert out == "POD_GATE file_uris_older_than_5_minutes=1\n"
 
 
-def test_cli_pod_gate_passes_at_zero(
+def test_cli_proof_of_delivery_gate_passes_at_zero(
     client: TestClient, config_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert evidence.main(["pod-gate"]) == 0
