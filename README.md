@@ -398,6 +398,44 @@ flowchart TB
     helm -. "scales and routes" .-> ns
 ```
 
+#### The UI in the browser
+
+The UI is a single-page app that the `api` pods serve under `/ui/`. It calls only the public API, and
+one runtime above the router is shared by every page. Legacy's UI is a separate, minimal tracking page
+served by nginx and is not changed.
+
+```mermaid
+flowchart TB
+    browser(["Browser at /ui/"])
+
+    subgraph served["Served by the api pods, strict CSP, no inline script or style"]
+        shell["index.html, no-cache<br/>hashed assets, immutable"]
+    end
+
+    subgraph app["React app"]
+        chrome["Header: navigation, LIVE pill, API activity<br/>Footer: stack badge"]
+        pages["Pages: Live, Track, Browse,<br/>New shipment, Shipment, System"]
+        subgraph runtime["One runtime above the router"]
+            engine["TrafficEngine<br/>1 to 20 per second, 8 in flight,<br/>stops after an hour or 1,000 created"]
+            store["ShipmentStore<br/>one copy of the shipments,<br/>a status never moves backwards"]
+            sync["Server sync<br/>every page of the list,<br/>15 s on Browse, 30 s on Track"]
+        end
+        log["API call log<br/>latest 200 calls, totals counted apart"]
+    end
+
+    api["Public API, unchanged<br/>shipments, events, track,<br/>proof of delivery, healthz, readyz"]
+
+    browser --> shell --> app
+    engine --> store
+    sync --> store
+    store --> pages
+    engine -- "create, event, read" --> api
+    sync -- "GET shipments, cursor pages" --> api
+    pages -- "forms, track, proof of delivery" --> api
+    api -. "every call is recorded" .-> log
+    log -.-> chrome
+```
+
 #### Event ingestion, before and after
 
 Legacy answers `202` before the event is stored, so a restart loses what is in the queue (AP-06).
@@ -493,7 +531,7 @@ flowchart LR
 | L6 v1.1.0 | Done: deployed and tagged `v1.1.0`. The S3 read path, `scripts/migrate_pod_to_s3.py`, the `ShipTrack-PodSync` document and `ops-pod-sync.yml`, and the data-key grant (ADR-0002, ADR-0003). Required before cutover wave 2 |
 
 Modern serves all traffic. Legacy is kept running as a fallback and nothing is destroyed: its UI
-is on the platform's preview port, for the addresses that port allows (platform ADR-0032). Its SLA
+is on the platform's preview port, for the addresses that port allows (platform ADR-0032). It is the original minimal tracking page (search, status, and event timeline) and is not changed; modern's UI is a larger app of its own (see the `shiptrack-modern` README). Its SLA
 and sync cron jobs are removed (`ops-legacy-cron.yml`, `ops-pod-sync.yml`), so it does not scan or sync.
 To fall back to it, suspend modern's SLA CronJob before restoring legacy's cron.
 `ops-simulate-events.yml` has seeded the stack with shipments, events, and proof-of-delivery files.
