@@ -14,9 +14,7 @@ workload, is where each one is remediated. The application code itself stays cle
 - The shared infrastructure it runs on, and the cutover weights: [`shiptrack-platform`](https://github.com/loriamichaelj/shiptrack-platform)
 - Detailed diagrams of all three repositories: [`ARCHITECTURE.md` in shiptrack-platform](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/ARCHITECTURE.md)
 
-`v1.0.0` is the tag `shiptrack-modern` forks from. A *proof of delivery* is the document a carrier produces
-when a shipment is delivered; names that stored data and the contract depend on, such as the `/pod` API
-paths and the `pod_documents` table, keep the old abbreviation.
+`v1.0.0` is the tag `shiptrack-modern` forks from.
 
 ## Migration strategy
 
