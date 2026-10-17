@@ -173,7 +173,7 @@ flowchart TB
     disk -. "ops-pod-sync, v1.1.0" .-> s3
 ```
 
-More diagrams (the platform's network and data, the shared services, the host's infrastructure, how a release
+More diagrams (the platform's shared services and pipeline roles, the host's infrastructure, how a release
 is deployed, the cluster, and delivery) are in
 [`ARCHITECTURE.md` in shiptrack-platform](https://github.com/loriamichaelj/shiptrack-platform/blob/dev/docs/ARCHITECTURE.md).
 
