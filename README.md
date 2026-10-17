@@ -1,12 +1,13 @@
 # shiptrack-legacy
 
-ShipTrack v1.x: the "before" stack of the EC2-to-EKS migration. A FastAPI shipment-tracking API
-with a small React tracking UI, deployed as a tarball to EC2 instances behind the platform ALB.
+ShipTrack v1.x: the source workload of the ShipTrack cloud migration. A FastAPI shipment-tracking API
+with a small React tracking UI, deployed as a tarball to EC2 instances behind the platform ALB. This is
+the application that the migration assesses, replatforms, and refactors onto EKS.
 
-This repository reproduces a realistic legacy deployment on purpose. The anti-patterns listed in
-`docs/DESIGN.md` §4 are requirements, and each one is tagged in code with `LEGACY AP-xx`. Do not
-fix them here; `shiptrack-modern` is where each one is fixed. The application code itself stays
-clean, typed, and tested.
+This repository reproduces a realistic legacy deployment on purpose, so that the migration has real
+findings to assess and resolve. The anti-patterns listed in `docs/DESIGN.md` §4 are requirements, and
+each one is tagged in code with `LEGACY AP-xx`. Do not fix them here; `shiptrack-modern`, the target
+workload, is where each one is remediated. The application code itself stays clean, typed, and tested.
 
 - Design: [`docs/DESIGN.md`](docs/DESIGN.md)
 - Decisions: [`docs/ADR.md`](docs/ADR.md)
@@ -15,6 +16,46 @@ clean, typed, and tested.
 **Terms.** A *proof of delivery* is the document a carrier produces when a shipment is delivered. This stack has no Kubernetes pods. Names that stored data and the contract depend on, such as the `/pod` API paths and the `pod_documents` table, keep the old abbreviation (ADR-0014).
 
 `v1.0.0` is the tag `shiptrack-modern` forks from.
+
+## Migration strategy
+
+ShipTrack is a cloud migration. The workload moves from EC2 hosts behind an ALB to containers on EKS,
+one wave of traffic at a time, and the same image is then taken to AKS and GKE
+([`shiptrack-modern-azure`](https://github.com/loriamichaelj/shiptrack-modern-azure),
+[`shiptrack-modern-gcp`](https://github.com/loriamichaelj/shiptrack-modern-gcp)). The strategy for each
+part of the workload is chosen from the **7 Rs** that AWS Prescriptive Guidance defines in
+[About the migration strategies](https://docs.aws.amazon.com/prescriptive-guidance/latest/large-migration-guide/migration-strategies.html):
+retire, retain, rehost, relocate, repurchase, replatform, and refactor or re-architect.
+
+**Assessment.** The source stack (`shiptrack-legacy`) carries sixteen anti-patterns on purpose
+(`AP-01` to `AP-16`, legacy design §4). Each is a finding that the assessment has to surface and the
+migration has to resolve. Their classification is **replatform, then refactor** (legacy design §9). A
+rehost alone would carry the worst of them to the new platform unchanged: an in-process event queue
+that loses events at a restart (`AP-06`), proof-of-delivery files on one host's disk that only sticky
+routing hides (`AP-05`), and an SLA scan that runs on every host (`AP-09`).
+
+**The seven Rs in ShipTrack**
+
+| R | What AWS means by it | In ShipTrack |
+|---|---|---|
+| Retire | Decommission or archive the application | The source stack's scheduled jobs (the SLA scan and the proof-of-delivery sync) are removed in Wave 3, and its local-disk proof-of-delivery store is retired by the move to S3. The stack as a whole is not retired: it stays as the fallback |
+| Retain | Keep the application in the source environment | The source stack keeps running behind the preview port as the fallback (platform ADR-0032). The shared PostgreSQL database and its schema, the frozen API contract, and the source stack's original minimal UI are kept as they are |
+| Rehost | Lift and shift, with no changes | Not used for the application, for the reason above. The source stack is itself the baseline that the assessment measures |
+| Relocate | Move to the cloud version of the same platform, or to another VPC, Region, or account | Not used. Both stacks run in one account and one VPC and share the platform's ALB and database; the cutover moves traffic, not servers |
+| Repurchase | Replace the application with a different product, usually SaaS | Not used for the application. ShipTrack is built, not bought |
+| Replatform | Move to the cloud with some optimization and no change to the core architecture | EC2 hosts become containers on EKS, with immutable images by digest, rolling deploys, pod autoscaling (HPA and KEDA) on arm64 nodes, and one identity and role per workload (`REM-03`, `REM-04`, `REM-10` to `REM-12`, `REM-14`). Logs and metrics are collected by managed services (the CloudWatch Observability add-on and Amazon Managed Prometheus). On Azure and GCP the same image runs on AKS and GKE against each cloud's managed database, queue, secret store, and object storage, through the cloud seam (modern ADR-0032) |
+| Refactor | Change the architecture to use cloud-native features | The three architectural defects are redesigned: the in-process queue becomes SQS, a worker, and EventBridge (`REM-06`); proof-of-delivery files move from host disk to S3 behind a presigned redirect (`REM-05`); and the cron job on every host becomes one CronJob with one atomic statement (`REM-09`). The application also gains credentials from Secrets Manager, real health probes, structured logs, and metrics (`REM-01`, `REM-02`, `REM-07`, `REM-08`, `REM-15`, `REM-16`) |
+
+AWS advises refactoring in a large migration only when the other strategies are not acceptable,
+because it is the most complex and costly. For one application with these three defects they were not
+acceptable, so the migration replatforms the runtime and refactors only the parts that a lift could
+not fix. Every refactor is its own pull request that names its `REM-xx`.
+
+**Cutover.** Traffic moves in waves by changing weights on the platform's ALB, by pull request in
+`shiptrack-platform`: Wave 0 dark launch, Wave 1 the read path and the UI, Wave 2 the write path, a
+handoff of schema ownership, and Wave 3 the scheduled jobs. Both stacks answer with an
+`X-ShipTrack-Stack` header, so a test that landed on the wrong stack fails. Rolling back is changing the
+weights back (modern design §9).
 
 ## Architecture
 
@@ -48,11 +89,11 @@ flowchart TB
         obs["Alarms, SNS sev1 and sev2,<br/>cutover dashboard"]
     end
 
-    subgraph legacy["shiptrack-legacy: the before stack"]
+    subgraph legacy["shiptrack-legacy: source stack"]
         asg["ASG: 2 EC2 hosts<br/>nginx, gunicorn, FastAPI"]
     end
 
-    subgraph modern["shiptrack-modern: the after stack"]
+    subgraph modern["shiptrack-modern: target stack"]
         eks["EKS pods: api, worker-events,<br/>worker-notify, sla-scan"]
         msg["SQS queues and<br/>EventBridge bus"]
     end
@@ -436,7 +477,7 @@ flowchart TB
     log -.-> chrome
 ```
 
-#### Event ingestion, before and after
+#### Event ingestion in the source and target stacks
 
 Legacy answers `202` before the event is stored, so a restart loses what is in the queue (AP-06).
 Modern answers `202` once SQS holds the event, and a worker applies it later (REM-06).
