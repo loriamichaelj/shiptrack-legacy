@@ -301,7 +301,7 @@ Only applied events are included, sorted by `occurred_at` ascending.
 
 **Rules**
 - Calls only `GET /api/v1/track/{tracking_number}`, using a same-origin relative URL. No CORS and no API base-URL configuration.
-- **Stack badge** in the footer shows which stack served the page ("Served by: legacy" or "Served by: modern"). On load the page asks for its own base path (`GET /ui/`, which the load balancer routes with the page) and reads the `X-ShipTrack-Stack` header of the answer, so the badge does not wait for a track request; it is then replaced by the `X-ShipTrack-Stack` value of each API response. This is how the audience watches traffic shift during Wave 1.
+- **Stack badge** in the footer shows which stack served the page ("Served by: v1" for legacy or "Served by: v3" for modern; ADR-0015). On load the page asks for its own base path (`GET /ui/`, which the load balancer routes with the page) and reads the `X-ShipTrack-Stack` header of the answer, so the badge does not wait for a track request; it is then replaced by the `X-ShipTrack-Stack` value of each API response. This is how the audience watches traffic shift during Wave 1.
 - Error states:
   - 404 → "No shipment found for MF…"
   - 422 or failed validation → validation message

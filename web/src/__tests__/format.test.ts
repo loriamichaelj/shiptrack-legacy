@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTimestamp, statusLabel } from "../format";
+import { formatTimestamp, stackLabel, statusLabel } from "../format";
 
 describe("formatTimestamp", () => {
   it("renders UTC regardless of the viewer's timezone", () => {
@@ -20,5 +20,13 @@ describe("statusLabel", () => {
   it("humanizes known statuses and passes unknown ones through", () => {
     expect(statusLabel("OUT_FOR_DELIVERY")).toBe("Out for delivery");
     expect(statusLabel("SOMETHING_NEW")).toBe("SOMETHING_NEW");
+  });
+});
+
+describe("stackLabel", () => {
+  it("names legacy v1 and modern v3 and passes unknown stacks through", () => {
+    expect(stackLabel("legacy")).toBe("v1");
+    expect(stackLabel("modern")).toBe("v3");
+    expect(stackLabel("other")).toBe("other");
   });
 });
