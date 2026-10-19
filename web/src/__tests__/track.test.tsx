@@ -61,7 +61,7 @@ describe("track page: loading and found", () => {
   it("shows the stack that served the response in the footer", async () => {
     stubFetch(jsonResponse(trackView(), { stack: "modern" }));
     renderApp(trackPath);
-    expect(await screen.findByText("Served by: modern")).toBeVisible();
+    expect(await screen.findByText("Served by: v3")).toBeVisible();
   });
 
   it("shows the delivery time for a delivered shipment and no auto-refresh note", async () => {
@@ -95,7 +95,7 @@ describe("track page: refreshing", () => {
     await advance(REFRESH_INTERVAL_MS);
     expect(await screen.findByText("Out for delivery", { selector: ".badge" })).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Served by: modern")).toBeVisible();
+    expect(screen.getByText("Served by: v3")).toBeVisible();
   });
 
   it("stops refreshing once the shipment is delivered", async () => {
@@ -154,7 +154,7 @@ describe("track page: error states", () => {
     stubFetch(jsonResponse(errorEnvelope("NOT_FOUND", "x"), { status: 404, stack: "legacy" }));
     renderApp("/track/MF0000000000");
     expect(await screen.findByText("No shipment found for MF0000000000.")).toBeVisible();
-    expect(screen.getByText("Served by: legacy")).toBeVisible();
+    expect(screen.getByText("Served by: v1")).toBeVisible();
     expect(screen.getByRole("link", { name: "Search for another shipment" })).toHaveAttribute(
       "href",
       "/",

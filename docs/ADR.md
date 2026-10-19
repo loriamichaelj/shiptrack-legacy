@@ -181,3 +181,13 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** A proof of delivery is the file a carrier uploads through `POST /api/v1/shipments/{id}/pod` as evidence of delivery, with its row in `pod_documents`. It is written "proof of delivery" in prose, comments, messages, and documentation, and "proof-of-delivery" when it qualifies a noun. Code names say `proof_of_delivery` (modules, functions, classes, settings attributes, tests). A pod, in lower case and never abbreviated to POD, is only ever a Kubernetes pod, and this stack has none. Names that other systems, stored data, or the frozen contract depend on are kept as they are: the `/pod` API paths, the `pod_documents` table, the `pod/` S3 key prefix and `/var/lib/shiptrack/pod` directory, the `pod_dir` key in `app.ini`, the `POD_BUCKET` variable, the `pod_bucket_name` and `pod_bucket_arn` platform contract keys, the `ShipTrack-PodSync` document and its `podBucket` parameter, `pod_sync.sh`, `migrate_pod_to_s3.py`, the `shiptrack-podsync` cron file, `ops-pod-sync.yml`, and the `pod-gate` check with its `POD_GATE` output line. The gate id `G-POD` is kept and reads as the proof-of-delivery gate.
 
 **Consequences:** No behavior, schema, contract, or deployed name changes. The kept names still contain `pod`; they stand for proof of delivery and are listed here so that a search for `pod` in this repository is read as proof of delivery, never as a Kubernetes pod. The same rule is recorded in the platform and modern ADRs, where `pod` also has its Kubernetes meaning.
+
+## ADR-0015: stack-version-labels
+
+**Status:** Accepted
+
+**Context:** The UI's footer names the stack that served the page with the value of `X-ShipTrack-Stack`: `legacy` or `modern`. The user asked for the UI to call them v1 and v3, on this stack's page as well as modern's (modern ADR-0041). The rule until now was that this UI is not changed once modern has its own.
+
+**Decision:** The footer shows legacy as v1 and modern as v3. One function in `web/src/format.ts` maps the header value to its label, and a value it does not know is shown as it is. `X-ShipTrack-Stack` keeps `legacy` and `modern`, and the badge's `data-stack` attribute keeps the header value. This is a display change only and an exception to the rule that this UI is not changed; the anti-patterns and the API are untouched.
+
+**Consequences:** The page and the header use different names for the same stack. The contract suite reads only the header and is unchanged. The label reaches the running stack only when a new legacy release is built and deployed.

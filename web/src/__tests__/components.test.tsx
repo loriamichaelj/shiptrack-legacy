@@ -61,7 +61,7 @@ describe("StackBadge", () => {
       </StackProvider>,
     );
     screen.getByRole("button").click();
-    return screen.findByText("Served by: modern");
+    return screen.findByText("Served by: v3");
   });
 
   it("requires its provider", () => {
@@ -76,7 +76,7 @@ describe("the stack of the page", () => {
         <StackBadge />
       </StackProvider>,
     );
-    expect(await screen.findByText("Served by: legacy")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v1")).toBeInTheDocument();
   });
 
   it("stays a dash when the probe has no answer", async () => {
@@ -118,10 +118,10 @@ describe("the stack of the page", () => {
       </StackProvider>,
     );
     screen.getByRole("button").click();
-    expect(await screen.findByText("Served by: modern")).toBeInTheDocument();
+    expect(await screen.findByText("Served by: v3")).toBeInTheDocument();
     answer("legacy");
     await Promise.resolve();
-    expect(screen.getByText("Served by: modern")).toBeInTheDocument();
+    expect(screen.getByText("Served by: v3")).toBeInTheDocument();
   });
 });
 
