@@ -191,3 +191,17 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** The footer shows legacy as v1 and modern as v3. One function in `web/src/format.ts` maps the header value to its label, and a value it does not know is shown as it is. `X-ShipTrack-Stack` keeps `legacy` and `modern`, and the badge's `data-stack` attribute keeps the header value. This is a display change only and an exception to the rule that this UI is not changed; the anti-patterns and the API are untouched.
 
 **Consequences:** The page and the header use different names for the same stack. The contract suite reads only the header and is unchanged. The label reaches the running stack only when a new legacy release is built and deployed.
+
+## ADR-0016: destroy-all-for-the-legacy-stack
+
+**Status:** Accepted
+
+**Context:** The owner wants every ShipTrack resource on AWS to have a way to be taken down. The three AWS repositories cannot be destroyed from one place: each pipeline's apply role reaches only its own state, and its trust accepts only tokens of its own repository's `dev` environment (platform design §6.11). The cost of this stack is the hosts, and its artifacts bucket is versioned, so Terraform cannot delete it while it holds a release.
+
+**Decision:** `destroy-all.yml` takes down the whole `terraform/envs/dev` root, and nothing else. It runs as `<PREFIX>-legacy-apply` in two jobs, each in the `dev` environment and each needing the owner's approval: a plan that prints the addresses and actions, then a destroy that makes a fresh plan and applies it from the same step. Both fail unless the dispatch input `confirm` is `all`. It uses the `tf-legacy-dev` concurrency group of `apply-terraform`, so a destroy and an apply never touch the state together. Both call `.github/scripts/terraform-destroy.sh`, which prints addresses and actions only and masks identifiers in a failure.
+
+The one protection is the artifacts bucket. The variable `artifacts_force_destroy` (default `false`) sets `force_destroy` on it; the destroy applies the bucket alone with the variable true, then destroys with it still true. That first apply is skipped if its plan would create the bucket, so a run that stopped part-way can be dispatched again. A normal apply sets the variable back to its default.
+
+The order across repositories is modern, then legacy, then platform. The platform's `destroy-all` refuses to start while this stack's parameters exist, because the platform's keys, network, and `tg-legacy` target group are what this stack uses. The platform's `bootstrap` root (state bucket, permission boundary, deploy roles) is never destroyed by a workflow.
+
+**Consequences:** Every release tarball and its versions are deleted, and the next release has to be built again; the application's data is the platform's and is dealt with there. The running hosts are terminated, and the preview port and the legacy fallback of the cutover (platform ADR-0032) are gone until the stack is applied again. `${PREFIX}-legacy-apply` has the delete actions for everything in this root as far as its policy reads (`ec2:*`, `autoscaling:*`, `s3:*` on the bucket, the SSM, log, alarm, and IAM deletes); that the first run completes with it is not yet proven **[VERIFY]**.

@@ -108,6 +108,7 @@ run "the_artifact_bucket_follows_the_design" {
   assert {
     condition = alltrue([
       aws_s3_bucket.artifacts.bucket == "shiptrack-legacy-artifacts-123456789012-us-east-1",
+      !aws_s3_bucket.artifacts.force_destroy,
       one(aws_s3_bucket_versioning.artifacts.versioning_configuration).status == "Enabled",
       one(one(aws_s3_bucket_server_side_encryption_configuration.artifacts.rule).apply_server_side_encryption_by_default).sse_algorithm == "AES256",
       aws_s3_bucket_public_access_block.artifacts.block_public_acls,

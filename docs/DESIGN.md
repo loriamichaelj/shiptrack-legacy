@@ -479,6 +479,7 @@ Steps: ruff, mypy, pytest (Postgres 17 service), UI (`npm ci`, `npm run lint`, `
 ### 7.5 Terraform — `.github/workflows/ci-terraform.yml`, `apply-terraform.yml`
 - **`ci-terraform.yml`** (pull_request, paths `terraform/**`): `<PREFIX>-legacy-plan` role via OIDC; `terraform fmt -check`, `init`, `validate`, then `plan -out` (never uploaded as an artifact) with an address-and-action-only summary posted as a PR comment (platform §6.12). **No Checkov or Trivy** (AP-13; the scans run out-of-band, §9). The plan role writes `.tflock` objects (platform §6.1).
 - **`apply-terraform.yml`** (push to `dev`, paths `terraform/**`): `environment: dev` (required reviewers), `<PREFIX>-legacy-apply` role; a fresh `plan -out`, then `apply` of that plan in the same job. `concurrency: { group: tf-legacy-dev, cancel-in-progress: false }`.
+- **`destroy-all.yml`** (manual, confirm `all`): `environment: dev`, `<PREFIX>-legacy-apply`; a plan job and a destroy job, each approved, take down the whole root (ADR-0016). Same concurrency group as `apply-terraform.yml`.
 - Infrastructure and application releases are separate pipelines: `deploy-app.yml` never runs Terraform, and Terraform never touches `current_release` (`ignore_changes`, §6). A new `ami_id` or other tfvars change goes through a PR like any other infrastructure change.
 
 ### 7.6 Evidence and assessment — `.github/workflows/check-evidence.yml`, `assess.yml`

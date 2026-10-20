@@ -130,6 +130,8 @@ jobs:
         run: tests/workflows/test_evidence.sh
       - name: Test legacy_cron.sh against a fake host tree
         run: tests/workflows/test_legacy_cron.sh
+      - name: Test terraform-destroy.sh against a fake terraform
+        run: tests/workflows/test_terraform_destroy.sh
       - name: Build the release tarball (not uploaded)
         run: scripts/build_tarball.sh "${GITHUB_SHA::12}"
       - name: Install it on amazonlinux:2023 and exercise deploy, rollback, and nginx
