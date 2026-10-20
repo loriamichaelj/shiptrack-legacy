@@ -62,3 +62,9 @@ variable "root_volume_size_gib" {
   type        = number
   default     = 100
 }
+
+variable "artifacts_force_destroy" {
+  description = "Let Terraform delete the artifacts bucket with every release and version in it. False except in the destroy-all workflow (ADR-0016)."
+  type        = bool
+  default     = false
+}

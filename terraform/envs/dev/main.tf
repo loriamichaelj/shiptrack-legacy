@@ -43,6 +43,9 @@ locals {
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = local.artifact_bucket
+
+  # Versioned, so Terraform cannot delete it while it holds releases. destroy-all sets this to true.
+  force_destroy = var.artifacts_force_destroy
 }
 
 resource "aws_s3_bucket_public_access_block" "artifacts" {
